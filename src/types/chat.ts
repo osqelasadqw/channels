@@ -1,0 +1,39 @@
+export interface Message {
+  id: string;
+  text: string;
+  senderId: string;
+  senderName: string;
+  senderPhotoURL?: string;
+  timestamp: number;
+  isAdmin?: boolean;
+  isRequest?: boolean;
+  isSystem?: boolean;
+  transactionData?: {
+    productId: string;
+    productName: string;
+    price: number;
+    useEscrow: boolean;
+    paymentMethod: string;
+    transactionId: number;
+  };
+}
+
+export interface Chat {
+  id: string;
+  productId: string;
+  participants: string[];
+  participantNames: Record<string, string>;
+  participantPhotos: Record<string, string>;
+  lastMessage?: Message;
+  createdAt: number;
+  adminJoined?: boolean;
+  hiddenBy?: string[];
+}
+
+export interface ChatState {
+  chats: Chat[];
+  activeChat: Chat | null;
+  messages: Message[];
+  loading: boolean;
+  error: string | null;
+} 

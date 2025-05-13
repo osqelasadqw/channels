@@ -1,0 +1,230 @@
+"use client";
+
+import { useEffect, useState } from "react";
+import { useRouter, usePathname } from "next/navigation";
+import Link from "next/link";
+import { useAuth } from "@/components/auth/AuthProvider";
+import { db } from "@/firebase/config";
+import { doc, getDoc, addDoc, collection, query, where, getDocs } from "firebase/firestore";
+import { Product } from "@/types/product";
+
+interface ContactPageProps {
+  params: {
+    id: string;
+  };
+}
+
+export default function ContactPage({ params }: ContactPageProps) {
+  const pathname = usePathname();
+  const productId = pathname.split('/').filter(Boolean).at(-2) || '';
+  
+  const [product, setProduct] = useState<Product | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [creatingChat, setCreatingChat] = useState(false);
+  const { user } = useAuth();
+  const router = useRouter();
+
+  // Fetch product details
+  useEffect(() => {
+    const fetchProduct = async () => {
+      try {
+        setLoading(true);
+        setError(null);
+
+        const productDocRef = doc(db, "products", productId);
+        const productDoc = await getDoc(productDocRef);
+
+        if (productDoc.exists()) {
+          setProduct({
+            id: productDoc.id,
+            ...productDoc.data()
+          } as Product);
+        } else {
+          setError("Product not found");
+        }
+      } catch (err) {
+        console.error("Error fetching product:", err);
+        setError("Failed to load product details");
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    if (productId) {
+      fetchProduct();
+    }
+  }, [productId]);
+
+  // Redirect if not authenticated
+  useEffect(() => {
+    if (!loading && !user) {
+      router.push("/");
+    }
+  }, [user, loading, router]);
+
+  const createChat = async () => {
+    if (!user || !product) return;
+
+    // Don't allow contacting yourself
+    if (user.id === product.userId) {
+      setError("You can't contact yourself");
+      return;
+    }
+
+    try {
+      setCreatingChat(true);
+
+      // Check if a chat already exists
+      const chatsQuery = query(
+        collection(db, "chats"),
+        where("productId", "==", product.id),
+        where("participants", "array-contains", user.id)
+      );
+
+      const existingChats = await getDocs(chatsQuery);
+      
+      if (!existingChats.empty) {
+        // Chat already exists, redirect to it
+        const chatId = existingChats.docs[0].id;
+        router.push(`/chats/${chatId}`);
+        return;
+      }
+
+      // Create a new chat
+      const chatData = {
+        productId: product.id,
+        participants: [user.id, product.userId],
+        participantNames: {
+          [user.id]: user.name,
+          [product.userId]: product.userEmail.split('@')[0] // Simple name from email
+        },
+        participantPhotos: {
+          [user.id]: user.photoURL || "",
+          [product.userId]: "" // Assuming no photo available
+        },
+        createdAt: Date.now(),
+        adminJoined: false
+      };
+
+      const chatRef = await addDoc(collection(db, "chats"), chatData);
+      
+      // Redirect to the new chat in the new interface
+      router.push(`/my-chats`);
+    } catch (err) {
+      console.error("Error creating chat:", err);
+      setError("Failed to initiate chat. Please try again.");
+    } finally {
+      setCreatingChat(false);
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="flex justify-center py-12">
+        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500"></div>
+      </div>
+    );
+  }
+
+  if (error || !product) {
+    return (
+      <div className="bg-red-100 text-red-700 p-6 rounded-lg">
+        <h2 className="text-xl font-bold mb-2">Error</h2>
+        <p>{error || "Product not found"}</p>
+        <Link 
+          href="/"
+          className="mt-4 inline-block px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
+        >
+          Back to Home
+        </Link>
+      </div>
+    );
+  }
+
+  if (!user) {
+    return null; // Will redirect due to the useEffect
+  }
+
+  // Don't allow contacting yourself
+  if (user.id === product.userId) {
+    return (
+      <div className="bg-yellow-100 text-yellow-800 p-6 rounded-lg">
+        <h2 className="text-xl font-bold mb-2">Notice</h2>
+        <p>This is your own listing. You cannot contact yourself.</p>
+        <Link 
+          href={`/products/${product.id}`}
+          className="mt-4 inline-block px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
+        >
+          Back to Listing
+        </Link>
+      </div>
+    );
+  }
+
+  return (
+    <div className="bg-white rounded-lg shadow-md p-6">
+      <h1 className="text-2xl font-bold mb-6">Contact Seller</h1>
+      
+      <div className="mb-6 p-4 bg-gray-50 rounded-lg">
+        <div className="flex items-center justify-between mb-4">
+          <div>
+            <h2 className="text-xl font-bold">{product.displayName}</h2>
+            <div className="flex items-center gap-2 mt-1">
+              <span className="px-2 py-1 bg-gray-100 text-xs font-semibold rounded">{product.platform}</span>
+              <span className="text-sm text-gray-500">{product.category}</span>
+            </div>
+          </div>
+          <div className="text-xl font-bold text-green-600">${product.price}</div>
+        </div>
+        <Link 
+          href={`/products/${product.id}`}
+          className="text-blue-600 hover:underline text-sm"
+        >
+          View full listing
+        </Link>
+      </div>
+      
+      <div className="mb-6">
+        <h2 className="text-lg font-bold mb-4">About This Process</h2>
+        <ul className="space-y-2 text-gray-700">
+          <li className="flex items-start gap-2">
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5 text-green-600 flex-shrink-0 mt-0.5">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M8.625 12a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0H8.25m4.125 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0H12m4.125 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0h-.375M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            <span>When you click "Start Chat", a new conversation with the seller will be created.</span>
+          </li>
+          <li className="flex items-start gap-2">
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5 text-green-600 flex-shrink-0 mt-0.5">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M8.625 12a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0H8.25m4.125 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0H12m4.125 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0h-.375M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            <span>You can ask questions about the channel, negotiate the price, and discuss the details.</span>
+          </li>
+          <li className="flex items-start gap-2">
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5 text-green-600 flex-shrink-0 mt-0.5">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M8.625 12a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0H8.25m4.125 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0H12m4.125 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0h-.375M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            <span>When ready to proceed, you can request an escrow agent to help facilitate the transaction safely.</span>
+          </li>
+        </ul>
+      </div>
+      
+      <div className="flex justify-between">
+        <Link 
+          href={`/products/${product.id}`}
+          className="px-4 py-2 bg-gray-200 text-gray-800 rounded-md hover:bg-gray-300 transition-colors"
+        >
+          Back to Listing
+        </Link>
+        
+        <button
+          onClick={createChat}
+          disabled={creatingChat}
+          className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors disabled:opacity-50"
+        >
+          {creatingChat ? "Creating Chat..." : "Start Chat"}
+        </button>
+      </div>
+    </div>
+  );
+} 

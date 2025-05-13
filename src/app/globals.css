@@ -1,0 +1,113 @@
+@import "tailwindcss";
+
+:root {
+  --background: #ffffff;
+  --foreground: #171717;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+/* გლუვი სქროლი მთელი დოკუმენტისთვის */
+html {
+  scroll-behavior: smooth;
+}
+
+/* გლუვი ტრანზიშენები ყველა ელემენტისთვის */
+* {
+  transition-property: background-color, border-color, color, fill, stroke, opacity, box-shadow, transform, filter, backdrop-filter;
+  transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+  transition-duration: 150ms;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: #0a0a0a;
+    --foreground: #ededed;
+  }
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: Arial, Helvetica, sans-serif;
+}
+
+/* Custom animations */
+@keyframes fadeOut {
+  0% { opacity: 1; }
+  80% { opacity: 1; }
+  100% { opacity: 0; }
+}
+
+.animate-fade-out {
+  animation: fadeOut 2s forwards;
+}
+
+/* ანიმაცია ელემენტის ქვემოდან ამოსვლისთვის */
+@keyframes fadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* პროდუქტის ბარათების ანიმაცია */
+.animate-product-appear {
+  animation: fadeInUp 0.5s ease-out forwards;
+}
+
+/* პროდუქტ კონტეინერის საწყისი მდგომარეობა და ანიმაცია */
+.product-card-container {
+  opacity: 0;
+  transform: translateY(25px);
+  transition: opacity 0.5s ease-out, transform 0.6s cubic-bezier(0.16, 1, 0.3, 1);
+  will-change: opacity, transform;
+}
+
+.product-card-container.visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+/* სქროლის დაუმალავი შემთხვევაში ლამაზი სქროლბარი */
+::-webkit-scrollbar {
+  width: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: rgba(243, 244, 246, 0.5);
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(107, 114, 128, 0.5);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(75, 85, 99, 0.7);
+}
+
+/* სხვადასხვა დაყოვნებით ანიმაციის გაშვება */
+.delay-appear-1 { animation-delay: 0.05s; }
+.delay-appear-2 { animation-delay: 0.1s; }
+.delay-appear-3 { animation-delay: 0.15s; }
+.delay-appear-4 { animation-delay: 0.2s; }
+
+/* Hide scrollbar but allow scrolling */
+.hide-scrollbar {
+  -ms-overflow-style: none;  /* IE and Edge */
+  scrollbar-width: none;  /* Firefox */
+}
+
+.hide-scrollbar::-webkit-scrollbar {
+  display: none; /* Chrome, Safari and Opera */
+}
