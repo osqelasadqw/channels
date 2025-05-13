@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, Suspense } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useAuth } from "@/components/auth/AuthProvider";
@@ -10,7 +10,8 @@ import { collection, query, where, onSnapshot, doc, updateDoc, arrayUnion, getDo
 import { db } from "@/firebase/config";
 import { Chat } from "@/types/chat";
 
-export default function MyChatsPage() {
+// ჩატების გვერდის შიგთავსის კომპონენტი
+function MyChatsContent() {
   const { user, loading } = useAuth();
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -151,6 +152,19 @@ export default function MyChatsPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+// მთავარი ექსპორტირებული კომპონენტი Suspense-ით
+export default function MyChatsPage() {
+  return (
+    <Suspense fallback={
+      <div className="flex justify-center items-center h-screen bg-gradient-to-r from-gray-50 to-gray-100">
+        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-indigo-600"></div>
+      </div>
+    }>
+      <MyChatsContent />
+    </Suspense>
   );
 }
 
