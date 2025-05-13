@@ -11,7 +11,7 @@ const firebaseConfig = {
   authDomain: "projec-cca43.firebaseapp.com",
   databaseURL: "https://projec-cca43-default-rtdb.europe-west1.firebasedatabase.app",
   projectId: "projec-cca43",
-  storageBucket: "projec-cca43.firebasestorage.app",
+  storageBucket: "projec-cca43.appspot.com",
   messagingSenderId: "198187490796",
   appId: "1:198187490796:web:120d4fa367e26b21a274c9",
   measurementId: "G-JQDC4K9T0K"
