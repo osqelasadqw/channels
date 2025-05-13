@@ -1,14 +1,37 @@
 "use client";
 
 import { useAuth } from "./AuthProvider";
+import { useRouter, usePathname } from "next/navigation";
+import { useState, useEffect } from "react";
 
 export default function LoginButton() {
   const { signInWithGoogle, loading } = useAuth();
+  const router = useRouter();
+  const pathname = usePathname();
+  const [isSigningIn, setIsSigningIn] = useState(false);
+
+  const handleSignIn = async () => {
+    try {
+      setIsSigningIn(true);
+      const success = await signInWithGoogle();
+      if (success) {
+        // თუ ეს login გვერდია, გადავამისამართოთ მთავარ გვერდზე
+        if (pathname === '/login') {
+          router.push("/");
+        }
+        // წინააღმდეგ შემთხვევაში, დავრჩეთ იგივე გვერდზე, რადგან ავტორიზაცია მოხდა
+      }
+    } catch (error) {
+      console.error("Sign in failed:", error);
+    } finally {
+      setIsSigningIn(false);
+    }
+  };
 
   return (
     <button 
-      onClick={signInWithGoogle}
-      disabled={loading}
+      onClick={handleSignIn}
+      disabled={loading || isSigningIn}
       className="flex items-center justify-center gap-2 px-4 py-2 bg-white text-gray-800 rounded-md border border-gray-300 hover:bg-gray-100 transition-colors"
     >
       <svg 
@@ -22,7 +45,7 @@ export default function LoginButton() {
         <path fill="#4CAF50" d="M24,44c5.166,0,9.86-1.977,13.409-5.192l-6.19-5.238C29.211,35.091,26.715,36,24,36c-5.202,0-9.619-3.317-11.283-7.946l-6.522,5.025C9.505,39.556,16.227,44,24,44z"/>
         <path fill="#1976D2" d="M43.611,20.083H42V20H24v8h11.303c-0.792,2.237-2.231,4.166-4.087,5.571c0.001-0.001,0.002-0.001,0.003-0.002l6.19,5.238C36.971,39.205,44,34,44,24C44,22.659,43.862,21.35,43.611,20.083z"/>
       </svg>
-      {loading ? "Loading..." : "Sign in with Google"}
+      {loading || isSigningIn ? "Loading..." : "Sign in with Google"}
     </button>
   );
 } 

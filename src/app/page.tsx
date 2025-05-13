@@ -11,6 +11,7 @@ import { useRouter } from "next/navigation";
 import { useAuth } from "@/components/auth/AuthProvider";
 import { ref, push } from "firebase/database";
 import { rtdb } from "@/firebase/config";
+import { getAuth, signOut } from "firebase/auth";
 
 // შენახული პროდუქტების მდგომარეობა გლობალურ მასშტაბში
 let cachedProducts: Product[] = [];
@@ -514,7 +515,22 @@ The funds are then released to the seller. Payments are sent instantly via all m
                       </Link>
                     )}
                     <hr className="my-2 border-gray-200" />
-                    <button className="w-full mt-2 block px-4 py-2 text-left text-red-600 hover:bg-red-50 rounded">
+                    <button 
+                      onClick={() => {
+                        // გამოსვლა Firebase-დან
+                        const auth = getAuth();
+                        signOut(auth).then(() => {
+                          // წარმატებით გამოვიდა
+                          router.push('/');
+                          // Cookies წაშლა
+                          document.cookie = "token=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;";
+                          localStorage.removeItem('lastChatId');
+                        }).catch((error) => {
+                          console.error("Logout error:", error);
+                        });
+                      }} 
+                      className="w-full mt-2 block px-4 py-2 text-left text-red-600 hover:bg-red-50 rounded"
+                    >
                       <div className="flex items-center">
                         <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5 mr-3 text-red-500">
                           <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15M12 9l-3 3m0 0l3 3m-3-3h12.75" />

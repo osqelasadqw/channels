@@ -61,6 +61,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       setLoading(true);
       const provider = new GoogleAuthProvider();
       await signInWithPopup(auth, provider);
+      // ავტორიზაცია წარმატებულია, მაგრამ გადამისამართებას LoginButton კომპონენტში ვმართავთ
     } catch (err) {
       setError("Failed to sign in with Google");
       console.error(err);
