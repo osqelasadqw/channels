@@ -108,6 +108,22 @@ export default function Home() {
         
         // გავფილტროთ მიმდინარე ფილტრების მიხედვით
         applyFilters(cachedProducts, filters);
+
+        // თუ შენახულია სქროლის პოზიცია, აღვადგინოთ
+        const savedScrollPos = sessionStorage.getItem('scrollPosition');
+        const savedCurrentPage = sessionStorage.getItem('currentPage');
+        
+        if (savedCurrentPage) {
+          setCurrentPage(parseInt(savedCurrentPage, 10));
+        }
+        
+        // გამოვიყენოთ setTimeout, რათა დარწმუნებული ვიყოთ, რომ DOM-ი განახლებულია
+        setTimeout(() => {
+          if (savedScrollPos) {
+            window.scrollTo(0, parseInt(savedScrollPos, 10));
+          }
+        }, 0);
+        
         return;
       }
       
@@ -145,7 +161,20 @@ export default function Home() {
     };
 
     fetchProducts();
+
+    // დავამატოთ სქროლის პოზიციის შენახვა გვერდის დატოვებისას
+    window.addEventListener('beforeunload', saveScrollPosition);
+    
+    return () => {
+      window.removeEventListener('beforeunload', saveScrollPosition);
+    };
   }, [filters]);
+
+  // ფუნქცია სქროლის პოზიციის შესანახად
+  const saveScrollPosition = () => {
+    sessionStorage.setItem('scrollPosition', window.scrollY.toString());
+    sessionStorage.setItem('currentPage', currentPage.toString());
+  };
 
   // ცალკე ფუნქცია ფილტრაციისთვის
   const applyFilters = (productList: Product[], currentFilters: FilterOptions) => {
@@ -275,7 +304,7 @@ export default function Home() {
       const existingChats = await getDocs(chatsQuery);
       
       if (!existingChats.empty) {
-        // Chat already exists, redirect to it
+        // Chat already exists, redirect to it with URL parameter
         const existingChatId = existingChats.docs[0].id;
         router.push(`/my-chats?chatId=${existingChatId}`);
         return;
@@ -362,7 +391,7 @@ The funds are then released to the seller. Payments are sent instantly via all m
       // შევინახოთ ბოლო ჩატის ID ლოკალურ სტორიჯში
       localStorage.setItem('lastChatId', chatRef.id);
       
-      // Redirect to the new chat interface კონკრეტულად
+      // Redirect to the new chat interface კონკრეტულად ახალ ჩატზე
       router.push(`/my-chats?chatId=${chatRef.id}`);
     } catch (err) {
       console.error("Error creating chat:", err);
@@ -404,7 +433,7 @@ The funds are then released to the seller. Payments are sent instantly via all m
     </div>
   );
 
-  // სკელეტონების მასივის შექმნა - ზუსტად იგივე რაოდენობა, რაც რეალური პროდუქტები
+  // სკელეტონების მასივის შექმნა - იმდენი რამდენიც პროდუქტია ერთ გვერდზე
   const renderSkeletons = () => {
     return Array.from({ length: productsPerPage }).map((_, index) => (
       <div key={`skeleton-${index}`} className="h-[450px] flex">

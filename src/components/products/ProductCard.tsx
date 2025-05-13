@@ -21,7 +21,6 @@ export default function ProductCard({ product, onContactSeller, className = "" }
   const [useEscrow, setUseEscrow] = useState<boolean>(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [mounted, setMounted] = useState(false);
-  const [imageLoaded, setImageLoaded] = useState<boolean>(true);
   
   // Use effect to set mounted to true on component mount
   useEffect(() => {

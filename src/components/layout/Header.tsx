@@ -8,7 +8,7 @@ import LoginButton from "@/components/auth/LoginButton";
 import UserMenu from "@/components/auth/UserMenu";
 
 export default function Header() {
-  const { user } = useAuth();
+  const { user, signOut } = useAuth();
   const [isMenuOpen, setIsMenuOpen] = useState(false);
 
   return (
@@ -147,7 +147,7 @@ export default function Header() {
                     href="#" 
                     onClick={(e) => {
                       e.preventDefault();
-                      useAuth().signOut();
+                      signOut();
                     }}
                     className="block px-3 py-2 rounded-md text-base font-medium text-red-600 hover:text-red-800 hover:bg-red-50"
                   >

@@ -57,9 +57,9 @@ export default function AdminChatList() {
     onValue(adminRequestsRef, (snapshot) => {
       const data = snapshot.val();
       if (data) {
-        const requestsList = Object.entries(data).map(([key, value]: [string, any]) => ({
+        const requestsList = Object.entries(data).map(([key, value]) => ({
           id: key,
-          ...value
+          ...value as Omit<AdminRequest, 'id'>
         }));
         
         // Sort requests by timestamp, newest first

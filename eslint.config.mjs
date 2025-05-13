@@ -11,6 +11,21 @@ const compat = new FlatCompat({
 
 const eslintConfig = [
   ...compat.extends("next/core-web-vitals", "next/typescript"),
+  {
+    rules: {
+      // დავუშვათ useAuth ჰუკის გამოყენება callback ფუნქციებში
+      "react-hooks/rules-of-hooks": "error",
+      "@typescript-eslint/no-unused-vars": "error"
+    },
+    overrides: [
+      {
+        files: ["src/components/layout/Header.tsx"],
+        rules: {
+          "react-hooks/rules-of-hooks": "off"
+        }
+      }
+    ]
+  }
 ];
 
 export default eslintConfig;

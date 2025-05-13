@@ -6,9 +6,10 @@ import { useDropzone } from "react-dropzone";
 import { v4 as uuidv4 } from "uuid";
 import { useAuth } from "@/components/auth/AuthProvider";
 import { ProductFormData } from "@/types/product";
-import { collection, addDoc, serverTimestamp } from "firebase/firestore";
+import { collection, addDoc } from "firebase/firestore";
 import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
 import { db, storage } from "@/firebase/config";
+import Image from "next/image";
 
 const platforms = ["YouTube", "TikTok", "Twitter", "Instagram", "Facebook", "Telegram"];
 
@@ -444,9 +445,11 @@ export default function ProductForm() {
                     <div className="grid grid-cols-2 gap-2 mt-2">
                       {filePreview.map((src, index) => (
                         <div key={index} className="relative group">
-                          <img 
+                          <Image 
                             src={src} 
-                            alt={`Image ${index + 1}`} 
+                            alt={`Image ${index + 1}`}
+                            width={64}
+                            height={64}
                             className="h-16 w-full object-cover rounded-md border border-blue-200"
                           />
                           <button

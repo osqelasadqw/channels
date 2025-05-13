@@ -5,7 +5,7 @@ import Image from "next/image";
 import { useAuth } from "@/components/auth/AuthProvider";
 import { Chat, Message } from "@/types/chat";
 import { db, rtdb } from "@/firebase/config";
-import { ref, push, onValue, off, serverTimestamp } from "firebase/database";
+import { ref, push, onValue, off } from "firebase/database";
 import { doc, getDoc, updateDoc } from "firebase/firestore";
 import { addDoc, collection } from "firebase/firestore";
 
@@ -73,9 +73,9 @@ export default function ChatInterface({ chatId, productId }: ChatInterfaceProps)
       const data = snapshot.val();
       console.log("Firebase RTD Data:", data);
       if (data) {
-        const messageList = Object.entries(data).map(([key, value]: [string, any]) => ({
+        const messageList = Object.entries(data).map(([key, value]) => ({
           id: key,
-          ...value
+          ...value as Omit<Message, 'id'>
         }));
         
         // Sort messages by timestamp
@@ -212,7 +212,7 @@ export default function ChatInterface({ chatId, productId }: ChatInterfaceProps)
       setIsSubmittingWallet(true);
       try {
         // Save the wallet address in Firebase
-        const walletDocRef = await addDoc(collection(db, "wallet_addresses"), {
+        await addDoc(collection(db, "wallet_addresses"), {
           userId: user?.id,
           productId: message.transactionData.productId,
           transactionId: message.transactionData.transactionId,
@@ -372,15 +372,19 @@ export default function ChatInterface({ chatId, productId }: ChatInterfaceProps)
         {!isOwn && (
           <div className="h-12 w-12 rounded-full overflow-hidden mr-2 flex-shrink-0 border border-gray-200 shadow-sm">
             {message.isAdmin ? (
-              <img 
+              <Image 
                 src="/agent.png" 
                 alt="Escrow Agent"
+                width={48}
+                height={48}
                 className="h-full w-full object-contain p-0"
               />
             ) : message.senderPhotoURL ? (
-              <img 
+              <Image 
                 src={message.senderPhotoURL} 
                 alt={message.senderName}
+                width={48}
+                height={48}
                 className="h-full w-full object-cover"
               />
             ) : (
@@ -432,15 +436,19 @@ export default function ChatInterface({ chatId, productId }: ChatInterfaceProps)
         {isOwn && (
           <div className="h-12 w-12 rounded-full overflow-hidden ml-2 flex-shrink-0 border border-gray-200 shadow-sm">
             {message.isAdmin ? (
-              <img 
+              <Image 
                 src="/agent.png" 
                 alt="Escrow Agent"
+                width={48}
+                height={48}
                 className="h-full w-full object-contain p-0"
               />
             ) : message.senderPhotoURL ? (
-              <img 
+              <Image 
                 src={message.senderPhotoURL} 
                 alt={message.senderName}
+                width={48}
+                height={48}
                 className="h-full w-full object-cover"
               />
             ) : (

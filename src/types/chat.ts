@@ -21,6 +21,7 @@ export interface Message {
 export interface Chat {
   id: string;
   productId: string;
+  productName?: string;
   participants: string[];
   participantNames: Record<string, string>;
   participantPhotos: Record<string, string>;

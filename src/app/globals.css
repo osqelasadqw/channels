@@ -48,34 +48,18 @@ body {
   animation: fadeOut 2s forwards;
 }
 
-/* ანიმაცია ელემენტის ქვემოდან ამოსვლისთვის */
-@keyframes fadeInUp {
-  from {
-    opacity: 0;
-    transform: translateY(20px);
-  }
-  to {
+/* სკელეტონის ანიმაცია */
+@keyframes pulse {
+  0%, 100% {
     opacity: 1;
-    transform: translateY(0);
+  }
+  50% {
+    opacity: 0.7;
   }
 }
 
-/* პროდუქტის ბარათების ანიმაცია */
-.animate-product-appear {
-  animation: fadeInUp 0.5s ease-out forwards;
-}
-
-/* პროდუქტ კონტეინერის საწყისი მდგომარეობა და ანიმაცია */
-.product-card-container {
-  opacity: 0;
-  transform: translateY(25px);
-  transition: opacity 0.5s ease-out, transform 0.6s cubic-bezier(0.16, 1, 0.3, 1);
-  will-change: opacity, transform;
-}
-
-.product-card-container.visible {
-  opacity: 1;
-  transform: translateY(0);
+.animate-pulse {
+  animation: pulse 1.5s cubic-bezier(0.4, 0, 0.6, 1) infinite;
 }
 
 /* სქროლის დაუმალავი შემთხვევაში ლამაზი სქროლბარი */
