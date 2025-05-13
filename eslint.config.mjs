@@ -16,15 +16,14 @@ const eslintConfig = [
       // დავუშვათ useAuth ჰუკის გამოყენება callback ფუნქციებში
       "react-hooks/rules-of-hooks": "error",
       "@typescript-eslint/no-unused-vars": "error"
-    },
-    overrides: [
-      {
-        files: ["src/components/layout/Header.tsx"],
-        rules: {
-          "react-hooks/rules-of-hooks": "off"
-        }
-      }
-    ]
+    }
+  },
+  // ცალკე კონფიგურაცია Header.tsx ფაილისთვის
+  {
+    files: ["src/components/layout/Header.tsx"],
+    rules: {
+      "react-hooks/rules-of-hooks": "off"
+    }
   }
 ];
 
