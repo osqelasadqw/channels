@@ -11,6 +11,7 @@ interface AdminRequest {
   id: string;
   chatId: string;
   productId: string;
+  productName?: string;
   requestedBy: string;
   requestedByName: string;
   timestamp: number;
@@ -42,6 +43,9 @@ export default function AdminChatList() {
   const [processing, setProcessing] = useState<string | null>(null);
   const [showDetailsModal, setShowDetailsModal] = useState(false);
   const [selectedNotification, setSelectedNotification] = useState<WalletNotification | null>(null);
+  const [searchQuery, setSearchQuery] = useState<string>('');
+  const [deleteConfirmation, setDeleteConfirmation] = useState<string | null>(null);
+  const [deleteRequestConfirmation, setDeleteRequestConfirmation] = useState<string | null>(null);
   const { user } = useAuth();
   const router = useRouter();
 
@@ -167,6 +171,62 @@ export default function AdminChatList() {
     setShowDetailsModal(true);
   };
 
+  const handleDeleteNotification = async (notificationId: string) => {
+    if (!user || !user.isAdmin) return;
+
+    try {
+      setProcessing(notificationId);
+      // Delete the notification from Firestore
+      await updateDoc(doc(db, "admin_notifications", notificationId), {
+        deleted: true,
+        deletedAt: Date.now()
+      });
+      
+      // Update the local state to remove the deleted notification
+      setWalletNotifications(prevNotifications => 
+        prevNotifications.filter(notification => notification.id !== notificationId)
+      );
+      
+      setDeleteConfirmation(null);
+    } catch (err) {
+      console.error("Error deleting notification:", err);
+      setError("შეცდომა შეტყობინების წაშლისას");
+    } finally {
+      setProcessing(null);
+    }
+  };
+
+  const handleDeleteRequest = async (requestId: string) => {
+    if (!user || !user.isAdmin) return;
+
+    try {
+      setProcessing(requestId);
+      // წავშალოთ მოთხოვნა Firebase-ის რეალურ დროის ბაზიდან
+      await remove(ref(rtdb, `adminRequests/${requestId}`));
+      
+      // განახლდება ავტომატურად onValue ლისენერის გამო
+      setDeleteRequestConfirmation(null);
+    } catch (err) {
+      console.error("Error deleting request:", err);
+      setError("შეცდომა მოთხოვნის წაშლისას");
+    } finally {
+      setProcessing(null);
+    }
+  };
+
+  // Filter notifications based on search query
+  const filteredNotifications = walletNotifications.filter(notification => {
+    if (!searchQuery) return true;
+    
+    const lowerCaseQuery = searchQuery.toLowerCase();
+    return (
+      notification.productName.toLowerCase().includes(lowerCaseQuery) ||
+      notification.buyerName.toLowerCase().includes(lowerCaseQuery) ||
+      notification.sellerName.toLowerCase().includes(lowerCaseQuery) ||
+      notification.walletAddress.toLowerCase().includes(lowerCaseQuery)
+    );
+  });
+
   if (!user || !user.isAdmin) {
     return (
       <div className="bg-red-100 text-red-700 p-4 rounded-md">
@@ -207,7 +267,7 @@ export default function AdminChatList() {
   }
 
   return (
-    <div className="bg-gradient-to-br from-white to-gray-50 rounded-xl shadow-xl border border-gray-200 overflow-hidden">
+    <div className="bg-gradient-to-br from-white to-gray-50 rounded-xl shadow-xl border border-gray-200 overflow-hidden w-full">
       <div className="p-8 border-b bg-gradient-to-r from-gray-900 to-indigo-900 text-white">
         <div className="flex items-start justify-between">
           <div>
@@ -225,6 +285,18 @@ export default function AdminChatList() {
             </p>
           </div>
           <div className="hidden md:flex items-center space-x-2">
+            <button 
+              onClick={() => {
+                const event = new CustomEvent('openProductsModal');
+                window.dispatchEvent(event);
+              }}
+              className="px-4 py-3 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded flex items-center"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2" viewBox="0 0 20 20" fill="currentColor">
+                <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM7 9a1 1 0 100-2 1 1 0 000 2zm7-1a1 1 0 11-2 0 1 1 0 012 0zm-7.536 5.879a1 1 0 001.415 0 3 3 0 014.242 0 1 1 0 001.415-1.415 5 5 0 00-7.072 0 1 1 0 000 1.415z" clipRule="evenodd" />
+              </svg>
+              პროდუქტების მართვა
+            </button>
             <div className="px-4 py-3 flex items-center gap-2 rounded-lg bg-indigo-800 bg-opacity-50 border border-indigo-700">
               <span className="relative flex h-3 w-3">
                 <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75"></span>
@@ -235,6 +307,154 @@ export default function AdminChatList() {
           </div>
         </div>
       </div>
+      
+      {/* ესქროუ სერვისის მოთხოვნები */}
+      {requests.length > 0 && (
+        <div className="p-8 border-b relative overflow-hidden">
+          <div className="absolute -top-10 right-0 w-96 h-96 bg-blue-50 rounded-full blur-3xl opacity-20"></div>
+          <div className="relative">
+            <div className="flex items-center justify-between mb-6">
+              <h3 className="text-xl font-bold text-gray-800 flex items-center gap-3">
+                <div className="p-2 rounded-full bg-gradient-to-br from-blue-500 to-indigo-600 text-white shadow-lg shadow-blue-200">
+                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-6 h-6">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12c0 1.268-.63 2.39-1.593 3.068a3.745 3.745 0 01-1.043 3.296 3.745 3.745 0 01-3.296 1.043A3.745 3.745 0 0112 21c-1.268 0-2.39-.63-3.068-1.593a3.746 3.746 0 01-3.296-1.043 3.745 3.745 0 01-1.043-3.296A3.745 3.745 0 013 12c0-1.268.63-2.39 1.593-3.068a3.745 3.745 0 011.043-3.296 3.746 3.746 0 013.296-1.043A3.746 3.746 0 0112 3c1.268 0 2.39.63 3.068 1.593a3.746 3.746 0 013.296 1.043 3.746 3.746 0 011.043 3.296A3.745 3.745 0 0121 12z" />
+                  </svg>
+                </div>
+                ესქროუ მოთხოვნები
+                <span className="ml-2 px-3 py-1 text-xs font-semibold rounded-full bg-blue-100 text-blue-800 border border-blue-200">
+                  {requests.length}
+                </span>
+              </h3>
+            </div>
+            
+            <div className="overflow-hidden rounded-xl border border-gray-200 shadow-lg">
+              <div className="overflow-x-auto overflow-y-auto max-h-[60vh]" style={{ scrollbarWidth: 'thin', scrollbarColor: '#d1d5db #f3f4f6' }}>
+                <table className="min-w-full divide-y divide-gray-200">
+                  <thead>
+                    <tr className="bg-gradient-to-r from-blue-700 to-indigo-600">
+                      <th scope="col" className="px-6 py-4 text-left text-xs font-semibold text-white uppercase tracking-wider">
+                        პროდუქტი
+                      </th>
+                      <th scope="col" className="px-6 py-4 text-left text-xs font-semibold text-white uppercase tracking-wider">
+                        მომხმარებელი
+                      </th>
+                      <th scope="col" className="px-6 py-4 text-left text-xs font-semibold text-white uppercase tracking-wider">
+                        თარიღი
+                      </th>
+                      <th scope="col" className="px-6 py-4 text-center text-xs font-semibold text-white uppercase tracking-wider">
+                        მოქმედება
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody className="bg-white divide-y divide-gray-200">
+                    {requests.map((request, idx) => (
+                      <tr key={request.id} 
+                          className={idx % 2 === 0 ? 'bg-white' : 'bg-gray-50'} 
+                          style={{transition: 'all 0.2s'}}
+                          onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#eff6ff'}
+                          onMouseLeave={(e) => e.currentTarget.style.backgroundColor = idx % 2 === 0 ? '#ffffff' : '#f9fafb'}>
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          <div className="flex items-center">
+                            <div className="flex-shrink-0 h-10 w-10 rounded-lg bg-blue-100 flex items-center justify-center shadow-sm">
+                              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5 text-blue-600">
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 21v-7.5a.75.75 0 01.75-.75h3a.75.75 0 01.75.75V21m-4.5 0H2.36m11.14 0H18m0 0h3.64m-1.39 0V9.349m-16.5 11.65V9.35m0 0a3.001 3.001 0 003.75-.615A2.993 2.993 0 009.75 9.75c.896 0 1.7-.393 2.25-1.016a2.993 2.993 0 002.25 1.016c.896 0 1.7-.393 2.25-1.016a3.001 3.001 0 003.75.614m-16.5 0a3.004 3.004 0 01-.621-4.72L4.318 3.44A1.5 1.5 0 015.378 3h13.243a1.5 1.5 0 011.06.44l1.19 1.189a3 3 0 01-.621 4.72m-13.5 8.65h3.75a.75.75 0 00.75-.75V13.5a.75.75 0 00-.75-.75H6.75a.75.75 0 00-.75.75v3.75c0 .415.336.75.75.75z" />
+                              </svg>
+                            </div>
+                            <div className="ml-4">
+                              <div className="text-sm font-medium text-gray-900 truncate max-w-[150px]">
+                                {request.productName || 'უცნობი პროდუქტი'}
+                              </div>
+                              <div className="text-xs text-gray-500 font-mono truncate max-w-[150px]">
+                                {request.productId}
+                              </div>
+                            </div>
+                          </div>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          <div className="text-sm text-gray-900">{request.requestedByName}</div>
+                          <div className="text-xs text-gray-500 font-mono">{request.requestedBy}</div>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-xs text-gray-500">
+                          <div className="flex items-center bg-gray-50 px-3 py-2 rounded-lg border border-gray-200">
+                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4 text-gray-500 mr-1.5">
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" />
+                            </svg>
+                            {new Date(request.timestamp).toLocaleString()}
+                          </div>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-center">
+                          <div className="flex space-x-2 justify-center">
+                            <button 
+                              onClick={() => handleJoinChat(request)}
+                              disabled={processing === request.id}
+                              className="inline-flex items-center justify-center px-3 py-1.5 text-sm font-medium rounded-lg 
+                                        bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-sm
+                                        hover:from-blue-700 hover:to-indigo-700 focus:outline-none focus:ring-1">
+                              {processing === request.id ? (
+                                <svg className="animate-spin h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                </svg>
+                              ) : (
+                                <>
+                                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4 mr-1">
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                  </svg>
+                                  შეუერთდი
+                                </>
+                              )}
+                            </button>
+                            
+                            {deleteRequestConfirmation === request.id ? (
+                              <div className="flex space-x-1">
+                                <button
+                                  onClick={() => handleDeleteRequest(request.id)}
+                                  disabled={processing === request.id}
+                                  className="inline-flex items-center justify-center px-3 py-1.5 text-sm font-medium rounded-lg bg-red-600 text-white shadow-sm hover:bg-red-700 focus:outline-none focus:ring-1">
+                                  {processing === request.id ? (
+                                    <svg className="animate-spin h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                    </svg>
+                                  ) : (
+                                    <>
+                                      <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4 mr-1">
+                                        <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+                                      </svg>
+                                      დიახ
+                                    </>
+                                  )}
+                                </button>
+                                <button 
+                                  onClick={() => setDeleteRequestConfirmation(null)}
+                                  className="inline-flex items-center justify-center px-3 py-1.5 text-sm font-medium rounded-lg bg-gray-400 text-white shadow-sm hover:bg-gray-500 focus:outline-none focus:ring-1">
+                                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4 mr-1">
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                                  </svg>
+                                  არა
+                                </button>
+                              </div>
+                            ) : (
+                              <button
+                                onClick={() => setDeleteRequestConfirmation(request.id)}
+                                className="inline-flex items-center justify-center px-3 py-1.5 text-sm font-medium rounded-lg bg-red-100 text-red-700 shadow-sm hover:bg-red-200 focus:outline-none focus:ring-1">
+                                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4 mr-1">
+                                  <path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" />
+                                </svg>
+                                წაშლა
+                              </button>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
       
       {walletNotifications.length > 0 && (
         <div className="p-8 border-b relative overflow-hidden">
@@ -252,9 +472,28 @@ export default function AdminChatList() {
                   {walletNotifications.length}
                 </span>
               </h3>
-              <div className="text-sm text-gray-500 font-medium flex items-center gap-2">
-                <span>ბოლო განახლება:</span>
-                <span className="text-gray-800 font-semibold">{new Date().toLocaleTimeString()}</span>
+              <div className="relative">
+                <input
+                  type="text"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder="ძებნა..."
+                  className="px-4 py-2 pl-10 text-sm border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500 outline-none shadow-sm"
+                />
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  className="h-5 w-5 text-gray-400 absolute left-3 top-1/2 transform -translate-y-1/2"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
+                  />
+                </svg>
               </div>
             </div>
             <div className="overflow-hidden rounded-xl border border-gray-200 shadow-lg">
@@ -283,7 +522,7 @@ export default function AdminChatList() {
                     </tr>
                   </thead>
                   <tbody className="bg-white divide-y divide-gray-200">
-                    {walletNotifications.map((notification, idx) => (
+                    {filteredNotifications.map((notification, idx) => (
                       <tr key={notification.id} 
                           className={idx % 2 === 0 ? 'bg-white' : 'bg-gray-50'} 
                           style={{transition: 'all 0.2s'}}
@@ -374,33 +613,70 @@ export default function AdminChatList() {
                           </div>
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-center">
-                          <button 
-                            onClick={() => {
-                              console.log('Navigating to chat (table):', notification.chatId);
-                              router.push(`/my-chats?chatId=${notification.chatId}`);
-                            }}
-                            className="inline-flex items-center justify-center px-4 py-2 text-sm font-medium rounded-lg 
-                                     bg-gradient-to-r from-emerald-600 to-green-600 text-white shadow-lg shadow-green-200
-                                     hover:from-emerald-700 hover:to-green-700 focus:outline-none focus:ring-2 
-                                     focus:ring-offset-2 focus:ring-green-500 transition-all duration-200 transform hover:scale-105">
-                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4 mr-2">
-                              <path strokeLinecap="round" strokeLinejoin="round" d="M7.5 8.25h9m-9 3H12m-9.75 1.51c0 1.6.8 3.11 2.19 4.024C6.07 18.332 7.5 19.5 9 19.5h6c1.5 0 2.93-1.168 3.99-2.715.32-.297.71-.53 1.13-.69M2.25 12l8.954-8.955c.44-.439 1.152-.439 1.591 0L21.75 12M4.5 9.75v10.125c0 .621.504 1.125 1.125 1.125H9.75v-4.875c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21h4.125c.621 0 1.125-.504 1.125-1.125V9.75" />
-                            </svg>
-                            ჩათში გადასვლა
-                          </button>
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-center">
-                          <button 
-                            onClick={() => handleShowDetails(notification)}
-                            className="inline-flex items-center justify-center px-4 py-2 text-sm font-medium rounded-lg 
-                                     bg-gradient-to-r from-gray-500 to-gray-600 text-white shadow-md shadow-gray-300
-                                     hover:from-gray-600 hover:to-gray-700 focus:outline-none focus:ring-2 
-                                     focus:ring-offset-2 focus:ring-gray-500 transition-all duration-200 transform hover:scale-105">
-                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4 mr-2">
-                              <path strokeLinecap="round" strokeLinejoin="round" d="M11.25 11.25l.041-.02a.75.75 0 011.063.852l-.708 2.836a.75.75 0 001.063.853l.041-.021M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9-3.75h.008v.008H12V8.25z" />
-                            </svg>
-                            დეტალები
-                          </button>
+                          <div className="flex space-x-2 justify-center">
+                            <button 
+                              onClick={() => {
+                                console.log('Navigating to chat (table):', notification.chatId);
+                                router.push(`/my-chats?chatId=${notification.chatId}`);
+                              }}
+                              className="inline-flex items-center justify-center px-3 py-1.5 text-sm font-medium rounded-lg 
+                                      bg-gradient-to-r from-emerald-600 to-green-600 text-white shadow-sm
+                                      hover:from-emerald-700 hover:to-green-700 focus:outline-none focus:ring-1">
+                              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4 mr-1">
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M7.5 8.25h9m-9 3H12m-9.75 1.51c0 1.6.8 3.11 2.19 4.024C6.07 18.332 7.5 19.5 9 19.5h6c1.5 0 2.93-1.168 3.99-2.715.32-.297.71-.53 1.13-.69M2.25 12l8.954-8.955c.44-.439 1.152-.439 1.591 0L21.75 12M4.5 9.75v10.125c0 .621.504 1.125 1.125 1.125H9.75v-4.875c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21h4.125c.621 0 1.125-.504 1.125-1.125V9.75" />
+                              </svg>
+                              ჩათი
+                            </button>
+                            <button 
+                              onClick={() => handleShowDetails(notification)}
+                              className="inline-flex items-center justify-center px-3 py-1.5 text-sm font-medium rounded-lg 
+                                      bg-gradient-to-r from-gray-500 to-gray-600 text-white shadow-sm
+                                      hover:from-gray-600 hover:to-gray-700 focus:outline-none focus:ring-1">
+                              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4 mr-1">
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M11.25 11.25l.041-.02a.75.75 0 011.063.852l-.708 2.836a.75.75 0 001.063.853l.041-.021M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9-3.75h.008v.008H12V8.25z" />
+                              </svg>
+                              დეტალები
+                            </button>
+                            {deleteConfirmation === notification.id ? (
+                              <div className="flex space-x-1">
+                                <button
+                                  onClick={() => handleDeleteNotification(notification.id)}
+                                  disabled={processing === notification.id}
+                                  className="inline-flex items-center justify-center px-3 py-1.5 text-sm font-medium rounded-lg bg-red-600 text-white shadow-sm hover:bg-red-700 focus:outline-none focus:ring-1">
+                                  {processing === notification.id ? (
+                                    <svg className="animate-spin h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                    </svg>
+                                  ) : (
+                                    <>
+                                      <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4 mr-1">
+                                        <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+                                      </svg>
+                                      დიახ
+                                    </>
+                                  )}
+                                </button>
+                                <button 
+                                  onClick={() => setDeleteConfirmation(null)}
+                                  className="inline-flex items-center justify-center px-3 py-1.5 text-sm font-medium rounded-lg bg-gray-400 text-white shadow-sm hover:bg-gray-500 focus:outline-none focus:ring-1">
+                                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4 mr-1">
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                                  </svg>
+                                  არა
+                                </button>
+                              </div>
+                            ) : (
+                              <button
+                                onClick={() => setDeleteConfirmation(notification.id)}
+                                className="inline-flex items-center justify-center px-3 py-1.5 text-sm font-medium rounded-lg bg-red-100 text-red-700 shadow-sm hover:bg-red-200 focus:outline-none focus:ring-1">
+                                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4 mr-1">
+                                  <path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" />
+                                </svg>
+                                წაშლა
+                              </button>
+                            )}
+                          </div>
                         </td>
                       </tr>
                     ))}
@@ -412,134 +688,6 @@ export default function AdminChatList() {
         </div>
       )}
       
-      {requests.length > 0 && (
-        <div className="p-8 relative overflow-hidden">
-          <div className="absolute top-0 left-20 w-96 h-96 bg-blue-50 rounded-full blur-3xl opacity-20"></div>
-          <div className="relative">
-            <div className="flex items-center justify-between mb-6">
-              <h3 className="text-xl font-bold text-gray-800 flex items-center gap-3">
-                <div className="p-2 rounded-full bg-gradient-to-br from-blue-500 to-indigo-600 text-white shadow-lg shadow-blue-200">
-                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-6 h-6">
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M20.25 8.511c.884.284 1.5 1.128 1.5 2.097v4.286c0 1.136-.847 2.1-1.98 2.193-.34.027-.68.052-1.02.072v3.091l-3-3c-1.354 0-2.694-.055-4.02-.163a2.115 2.115 0 01-.825-.242m9.345-8.334a2.126 2.126 0 00-.476-.095 48.64 48.64 0 00-8.048 0c-1.131.094-1.976 1.057-1.976 2.192v4.286c0 .837.46 1.58 1.155 1.951m9.345-8.334V6.637c0-1.621-1.152-3.026-2.76-3.235A48.455 48.455 0 0011.25 3c-2.115 0-4.198.137-6.24.402-1.608.209-2.76 1.614-2.76 3.235v6.226c0 1.621 1.152 3.026 2.76 3.235.577.075 1.157.14 1.74.194V21l4.155-4.155" />
-                  </svg>
-              </div>
-                
-                <span className="ml-2 px-3 py-1 text-xs font-semibold rounded-full bg-blue-100 text-blue-800 border border-blue-200">
-                  {requests.length}
-                </span>
-              </h3>
-              <div className="text-sm text-gray-500 font-medium flex items-center gap-2">
-                <span>მოთხოვნების სტატუსი:</span>
-                <span className="flex items-center text-blue-600 font-semibold">
-                  <span className="relative flex h-3 w-3 mr-2">
-                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
-                    <span className="relative inline-flex rounded-full h-3 w-3 bg-blue-500"></span>
-                  </span>
-                  აქტიური
-                </span>
-              </div>
-            </div>
-            <div className="overflow-hidden rounded-xl border border-gray-200 shadow-lg">
-              <div className="overflow-x-auto overflow-y-auto max-h-[60vh]" style={{ scrollbarWidth: 'thin', scrollbarColor: '#d1d5db #f3f4f6' }}>
-                <table className="min-w-full divide-y divide-gray-200">
-                  <thead>
-                    <tr className="bg-gradient-to-r from-blue-700 to-indigo-600">
-                      <th scope="col" className="px-6 py-4 text-left text-xs font-semibold text-white uppercase tracking-wider">
-                        მომხმარებელი
-                      </th>
-                      <th scope="col" className="px-6 py-4 text-left text-xs font-semibold text-white uppercase tracking-wider">
-                        მოთხოვნის დეტალები
-                      </th>
-                      <th scope="col" className="px-6 py-4 text-left text-xs font-semibold text-white uppercase tracking-wider">
-                        თარიღი
-                      </th>
-                      <th scope="col" className="px-6 py-4 text-center text-xs font-semibold text-white uppercase tracking-wider">
-                        მოქმედება
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody className="bg-white divide-y divide-gray-200">
-                    {requests.map((request, idx) => (
-                      <tr key={request.id} 
-                          className={idx % 2 === 0 ? 'bg-white' : 'bg-gray-50'} 
-                          style={{transition: 'all 0.3s'}}
-                          onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#eff6ff'}
-                          onMouseLeave={(e) => e.currentTarget.style.backgroundColor = idx % 2 === 0 ? '#ffffff' : '#f9fafb'}>
-                        <td className="px-6 py-4 whitespace-nowrap">
-                          <div className="flex items-center">
-                            <div className="flex-shrink-0 h-10 w-10 rounded-lg bg-blue-100 flex items-center justify-center shadow-sm">
-                              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5 text-blue-600">
-                                <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z" />
-                              </svg>
-                            </div>
-                            <div className="ml-4">
-                              <div className="text-sm font-medium text-gray-900">
-                                {request.requestedByName}
-                              </div>
-                              <div className="mt-1 text-xs text-gray-500">
-                                მომხმარებლის ID: <span className="font-mono bg-gray-100 px-1 py-0.5 rounded text-gray-700">{request.requestedBy.substring(0, 6)}</span>
-                              </div>
-                            </div>
-                          </div>
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap">
-                          <div className="flex flex-col space-y-2">
-                            <div className="text-xs text-gray-700 flex items-center gap-2">
-                              <span className="font-medium text-gray-500">Chat ID:</span>
-                              <span className="font-mono bg-blue-50 px-2 py-1 rounded-md text-blue-700 border border-blue-100">{request.chatId.substring(0, 8)}...</span>
-                            </div>
-                            <div className="text-xs text-gray-700 flex items-center gap-2">
-                              <span className="font-medium text-gray-500">Product ID:</span>
-                              <span className="font-mono bg-indigo-50 px-2 py-1 rounded-md text-indigo-700 border border-indigo-100">{request.productId.substring(0, 8)}...</span>
-                            </div>
-                          </div>
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-xs text-gray-500">
-                          <div className="flex items-center bg-gray-50 px-3 py-2 rounded-lg border border-gray-200">
-                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4 text-gray-500 mr-1.5">
-                              <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" />
-                            </svg>
-                            {new Date(request.timestamp).toLocaleString()}
-                          </div>
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-center">
-              <button
-                onClick={() => handleJoinChat(request)}
-                disabled={processing === request.id}
-                            className="inline-flex items-center justify-center px-4 py-2 text-sm font-medium rounded-lg 
-                                     bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-lg shadow-blue-200
-                                     hover:from-blue-700 hover:to-indigo-700 focus:outline-none focus:ring-2 
-                                     focus:ring-offset-2 focus:ring-indigo-500 transition-all duration-200 transform hover:scale-105
-                                     disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none">
-                            {processing === request.id ? (
-                              <>
-                                <svg className="animate-spin -ml-1 mr-2 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                                </svg>
-                                მიერთება...
-                              </>
-                            ) : (
-                              <>
-                                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4 mr-2">
-                                  <path strokeLinecap="round" strokeLinejoin="round" d="M20.25 8.511c.884.284 1.5 1.128 1.5 2.097v4.286c0 1.136-.847 2.1-1.98 2.193-.34.027-.68.052-1.02.072v3.091l-3-3c-1.354 0-2.694-.055-4.02-.163a2.115 2.115 0 01-.825-.242m9.345-8.334a2.126 2.126 0 00-.476-.095 48.64 48.64 0 00-8.048 0c-1.131.094-1.976 1.057-1.976 2.192v4.286c0 .837.46 1.58 1.155 1.951m9.345-8.334V6.637c0-1.621-1.152-3.026-2.76-3.235A48.455 48.455 0 0011.25 3c-2.115 0-4.198.137-6.24.402-1.608.209-2.76 1.614-2.76 3.235v6.226c0 1.621 1.152 3.026 2.76 3.235.577.075 1.157.14 1.74.194V21l4.155-4.155" />
-                                </svg>
-                                ჩათში შესვლა
-                              </>
-                            )}
-              </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-            </div>
-            </div>
-          </div>
-      </div>
-      )}
-
-      {/* Details Modal */}
       {showDetailsModal && selectedNotification && (
         <div className="fixed inset-0 flex items-center justify-center z-50 p-4 backdrop-blur-sm">
           <div className="bg-gradient-to-br from-white to-gray-100 rounded-xl shadow-2xl max-w-2xl w-full relative border border-gray-200 transform transition-all scale-100 opacity-100">
