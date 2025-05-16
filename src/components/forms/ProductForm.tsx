@@ -106,7 +106,7 @@ export default function ProductForm() {
   // Function for calling YouTube API
   const fetchYoutubeChannelData = async (url: string) => {
     try {
-      setIsLoading(true);
+      // setIsLoading(true) -- უკვე დაყენებულია უფრო ადრე
       setIsValidChannel(false);
       
       // Try to extract channel name from URL
@@ -114,24 +114,35 @@ export default function ProductForm() {
       
       if (!channelQuery) {
         console.log("Could not extract channel identifier from URL:", url);
+        setIsLoading(false);
         return;
       }
       
-      // First try using search API to find the channel
-      const searchUrl = `https://www.googleapis.com/youtube/v3/search?part=snippet&q=${channelQuery}&type=channel&maxResults=1&key=${process.env.NEXT_PUBLIC_YOUTUBE_API_KEY}`;
+      // პირდაპირ ვამოწმებთ თუ URL-ში არის ცნობილი იდენტიფიკატორი
+      let channelId;
       
-      const searchResponse = await fetch(searchUrl);
-      const searchData = await searchResponse.json();
-      
-      if (!searchData.items || searchData.items.length === 0) {
-        console.log("No channels found for query:", channelQuery);
-        return;
+      // პირდაპირ ამოვიღოთ channel ID, თუ უკვე URL-ში არის
+      const channelIdMatch = url.match(/youtube\.com\/channel\/([^\/\?]+)/);
+      if (channelIdMatch && channelIdMatch[1]) {
+        channelId = channelIdMatch[1];
+      } else {
+        // სხვა შემთხვევაში გამოვიყენოთ search API
+        const searchUrl = `https://www.googleapis.com/youtube/v3/search?part=snippet&q=${channelQuery}&type=channel&maxResults=1&key=${process.env.NEXT_PUBLIC_YOUTUBE_API_KEY}`;
+        
+        const searchResponse = await fetch(searchUrl);
+        const searchData = await searchResponse.json();
+        
+        if (!searchData.items || searchData.items.length === 0) {
+          console.log("No channels found for query:", channelQuery);
+          setIsLoading(false);
+          return;
+        }
+        
+        // Get channel ID from search results
+        channelId = searchData.items[0].id.channelId;
       }
       
-      // Get channel ID from search results
-      const channelId = searchData.items[0].id.channelId;
-      
-      // Now get detailed information about the channel
+      // პარალელური მოთხოვნა მონაცემების უფრო სწრაფად წამოსაღებად
       const channelUrl = `https://www.googleapis.com/youtube/v3/channels?part=snippet,statistics&id=${channelId}&key=${process.env.NEXT_PUBLIC_YOUTUBE_API_KEY}`;
       
       const channelResponse = await fetch(channelUrl);
@@ -298,10 +309,17 @@ export default function ProductForm() {
 
   // Watch for accountLink changes
   useEffect(() => {
+    // დავაყენოთ ჩატვირთვის ანიმაცია დაუყოვნებლივ, თუ ლინკი არის YouTube-ის
+    if (formData.accountLink && 
+      (formData.accountLink.includes('youtube.com') || formData.accountLink.includes('youtu.be'))) {
+      setIsLoading(true);
+    }
+    
     const timeoutId = setTimeout(async () => {
       if (!formData.accountLink.trim()) {
         setIsValidChannel(false);
         setIsChannelAlreadyUploaded(false);
+        setIsLoading(false);
         return;
       }
       
@@ -316,6 +334,7 @@ export default function ProductForm() {
         const channelExists = await checkIfChannelExists(formData.accountLink);
         if (channelExists) {
           setIsValidChannel(false);
+          setIsLoading(false);
         }
       }
       
@@ -333,14 +352,17 @@ export default function ProductForm() {
           fetchYoutubeChannelData(formData.accountLink);
         } else {
           setIsValidChannel(false);
+          setIsLoading(false);
         }
       } else if (formData.accountLink && !isChannelAlreadyUploaded) {
         // სხვა პლატფორმებისთვის საკმარისია უბრალოდ ბმულის არსებობა
         setIsValidChannel(formData.accountLink.trim() !== "");
+        setIsLoading(false);
       } else {
         setIsValidChannel(false);
+        setIsLoading(false);
       }
-    }, 1000); // 1 second delay after typing finished
+    }, 300); // 300 მილიწამიანი დაყოვნება ნაცვლად 1000-ისა
     
     return () => clearTimeout(timeoutId);
   }, [formData.accountLink, formData.platform, isChannelAlreadyUploaded]);
@@ -602,18 +624,46 @@ $${formData.expenses} — expense (month)`;
           </div>
         )}
         
-        {!isValidChannel && (
+        {!isValidChannel && formData.platform === "YouTube" && (
+          <div className="flex-1">
+            <input
+              type="number"
+              name="price"
+              value={formData.price === 0 ? "" : formData.price}
+              onChange={handleChange}
+              min="0"
+              placeholder="Price ($)"
+              required
+              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-400"
+            />
+          </div>
+        )}
+        
+        {!isValidChannel && formData.platform !== "YouTube" && (
           <>
-            <div className="flex-1">
-              <input
-                type="text"
-                name="displayName"
-                value={formData.displayName}
-                onChange={handleChange}
-                placeholder="Channel Name"
-                required
-                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-400"
-              />
+            <div className="flex space-x-2">
+              <div className="flex-1">
+                <input
+                  type="text"
+                  name="displayName"
+                  value={formData.displayName}
+                  onChange={handleChange}
+                  placeholder="Channel Name"
+                  required
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-400"
+                />
+              </div>
+              <div className="flex-1">
+                <input
+                  type="number"
+                  name="subscribers"
+                  value={formData.subscribers === 0 ? "" : formData.subscribers}
+                  onChange={handleChange}
+                  min="0"
+                  placeholder="Subscribers"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-400"
+                />
+              </div>
             </div>
 
             <div className="flex-1">
