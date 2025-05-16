@@ -21,23 +21,17 @@ interface FilterBarProps {
 
 const platforms = ["YouTube", "TikTok", "Twitter", "Instagram", "Facebook", "Telegram"];
 const categories = [
-  "Cars & Bikes", 
-  "Luxury & Motivation", 
-  "Pets & Animals", 
-  "Games", 
-  "Movies & Music", 
-  "Fashion & Style", 
-  "Educational & QA", 
-  "Food", 
-  "Nature", 
-  "Fitness & Sports", 
-  "Travel", 
-  "Beautiful girls", 
-  "Humor", 
-  "Models & Celebrities", 
-  "Reviews & How-to", 
-  "YouTube shorts & Facebook reels", 
-  "Crypto & NFT"
+  "Entertainment",
+  "Gaming",
+  "Education",
+  "Technology",
+  "Business",
+  "Lifestyle",
+  "Travel",
+  "Sports",
+  "Food",
+  "Fashion",
+  "Other"
 ];
 
 export default function FilterBar({ onFilterChange }: FilterBarProps) {
@@ -93,7 +87,7 @@ export default function FilterBar({ onFilterChange }: FilterBarProps) {
             value={filters.category || ""}
             onChange={(e) => handleFilterChange("category", e.target.value)}
           >
-            <option value="">Select topic</option>
+            <option value="">Select category</option>
             {categories.map((category) => (
               <option key={category} value={category}>{category}</option>
             ))}

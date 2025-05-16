@@ -10,6 +10,8 @@ import {
 } from "firebase/auth";
 import { auth } from "@/firebase/config";
 import { User } from "@/types/user";
+import { isUserAdmin, createOrUpdateUser } from "@/firebase/userRoles";
+import { serverTimestamp } from "firebase/firestore";
 
 interface AuthContextType {
   user: User | null;
@@ -35,17 +37,36 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
+    const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
       setLoading(true);
       if (firebaseUser) {
-        const isAdmin = firebaseUser.email === "osqelan1@gmail.com";
-        setUser({
-          id: firebaseUser.uid,
-          email: firebaseUser.email || "",
-          name: firebaseUser.displayName || "",
-          photoURL: firebaseUser.photoURL || undefined,
-          isAdmin
-        });
+        try {
+          // Firestore-ში შევამოწმებთ არის თუ არა მომხმარებელი ადმინისტრატორი
+          const isAdmin = await isUserAdmin(firebaseUser.uid);
+          
+          // განვაახლოთ მომხმარებლის დოკუმენტი Firestore-ში - მხოლოდ lastLogin განახლდება
+          await createOrUpdateUser(firebaseUser.uid, {
+            lastLogin: serverTimestamp(),
+          });
+          
+          // დავაყენოთ მომხმარებლის ობიექტი
+          setUser({
+            id: firebaseUser.uid,
+            email: firebaseUser.email || "",
+            name: firebaseUser.displayName || "",
+            photoURL: firebaseUser.photoURL || undefined,
+            isAdmin
+          });
+        } catch (error) {
+          console.error("Error checking admin status:", error);
+          setUser({
+            id: firebaseUser.uid,
+            email: firebaseUser.email || "",
+            name: firebaseUser.displayName || "",
+            photoURL: firebaseUser.photoURL || undefined,
+            isAdmin: false
+          });
+        }
       } else {
         setUser(null);
       }
@@ -60,8 +81,20 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       setError(null);
       setLoading(true);
       const provider = new GoogleAuthProvider();
-      await signInWithPopup(auth, provider);
-      // ავტორიზაცია წარმატებულია, მაგრამ გადამისამართებას LoginButton კომპონენტში ვმართავთ
+      const result = await signInWithPopup(auth, provider);
+      
+      // პირველი რეგისტრაციის დროს შევქმნათ მომხმარებლის დოკუმენტი
+      if (result.user) {
+        await createOrUpdateUser(result.user.uid, {
+          email: result.user.email || "",
+          name: result.user.displayName || "",
+          photoURL: result.user.photoURL || undefined,
+          admin: false,
+          roles: { admin: false },
+          createdAt: serverTimestamp(),
+          lastLogin: serverTimestamp(),
+        });
+      }
     } catch (err) {
       setError("Failed to sign in with Google");
       console.error(err);

@@ -18,7 +18,7 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en">
-      <body className={`${inter.className} min-h-screen flex flex-col bg-gray-100`}>
+      <body className={`${inter.className} min-h-screen flex flex-col bg-gray-100 w-full max-w-full overflow-x-hidden`}>
         <AuthProvider>
           <PageLayoutClient>{children}</PageLayoutClient>
         </AuthProvider>

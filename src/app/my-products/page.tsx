@@ -235,7 +235,7 @@ export default function MyProductsPage() {
                     <td className="px-6 py-5 whitespace-nowrap">
                       <div className="flex items-center">
                         <div className="h-12 w-12 flex-shrink-0 mr-4 relative rounded-lg overflow-hidden shadow-sm">
-                          {product.imageUrls.length > 0 ? (
+                          {product.imageUrls && product.imageUrls.length > 0 ? (
                             <Image 
                               src={product.imageUrls[0]} 
                               alt={product.displayName}
@@ -291,7 +291,7 @@ export default function MyProductsPage() {
                     </td>
                     <td className="px-6 py-5 whitespace-nowrap">
                       <div className="text-sm font-semibold text-gray-900">${product.price.toLocaleString()}</div>
-                      {product.income > 0 && (
+                      {product.income && product.income > 0 && (
                         <div className="text-xs text-green-600 flex items-center mt-1">
                           <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-3 h-3 mr-1">
                             <path d="M12 7.5a2.25 2.25 0 100 4.5 2.25 2.25 0 000-4.5z" />

@@ -7,6 +7,8 @@ import { useAuth } from "@/components/auth/AuthProvider";
 import { db } from "@/firebase/config";
 import { doc, getDoc, addDoc, collection, query, where, getDocs } from "firebase/firestore";
 import { Product } from "@/types/product";
+import { ref, push } from "firebase/database";
+import { rtdb } from "@/firebase/config";
 
 interface ContactPageProps {
   params: {
@@ -24,6 +26,8 @@ export default function ContactPage({ params }: ContactPageProps) {
   const [creatingChat, setCreatingChat] = useState(false);
   const { user } = useAuth();
   const router = useRouter();
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [message, setMessage] = useState('');
 
   // Fetch product details
   useEffect(() => {
@@ -63,59 +67,116 @@ export default function ContactPage({ params }: ContactPageProps) {
     }
   }, [user, loading, router]);
 
-  const createChat = async () => {
-    if (!user || !product) return;
+  const handleContactSeller = async (e: React.FormEvent) => {
+    e.preventDefault();
 
-    // Don't allow contacting yourself
-    if (user.id === product.userId) {
-      setError("You can't contact yourself");
+    if (!user || !user.id) {
+      router.push('/login');
+      return;
+    }
+
+    if (!product) {
       return;
     }
 
     try {
-      setCreatingChat(true);
+      setIsSubmitting(true);
+      console.log("Starting contact seller process...");
+      console.log("Current user ID:", user.id);
+      console.log("Seller ID:", product.userId);
 
-      // Check if a chat already exists
+      // შევამოწმოთ არსებობს თუ არა ჩატი ერთი where პირობით ინდექსის შეცდომის თავიდან ასაცილებლად
       const chatsQuery = query(
         collection(db, "chats"),
-        where("productId", "==", product.id),
-        where("participants", "array-contains", user.id)
+        where("productId", "==", product.id)
       );
 
+      console.log("Checking if chat exists for product:", product.id);
       const existingChats = await getDocs(chatsQuery);
+      let chatId;
       
-      if (!existingChats.empty) {
-        // Chat already exists, redirect to it
-        const chatId = existingChats.docs[0].id;
-        router.push(`/chats/${chatId}`);
-        return;
+      // ფილტრაცია კოდში - შევამოწმოთ არსებობს თუ არა ჩატი იმავე მომხმარებლებით
+      const existingChat = existingChats.docs.find(doc => {
+        const chatData = doc.data();
+        const participants = chatData.participants || [];
+        return participants.includes(user.id);
+      });
+
+      if (existingChat) {
+        chatId = existingChat.id;
+        console.log("Found existing chat with product seller:", chatId);
+      } else {
+        console.log("Creating new chat...");
+        
+        const chatData = {
+          productId: product.id,
+          productName: product.displayName,
+          productImage: product.imageUrls && product.imageUrls.length > 0 ? product.imageUrls[0] : "",
+          participants: [user.id, product.userId],
+          participantNames: {
+            [user.id]: user.name || user.email?.split('@')[0] || "User",
+            [product.userId]: product.userEmail?.split('@')[0] || "Seller"
+          },
+          participantPhotos: {
+            [user.id]: user.photoURL || "",
+            [product.userId]: "" // We don't have seller's photo
+          },
+          productPrice: product.price,
+          lastMessage: {
+            text: message,
+            senderId: user.id,
+            timestamp: Date.now()
+          },
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+          unreadCount: {
+            [product.userId]: 1, // Unread for seller
+            [user.id]: 0 // Read for buyer
+          },
+          isActive: true,
+          adminJoined: false
+        };
+        
+        // Create the chat document
+        const chatRef = await addDoc(collection(db, "chats"), chatData);
+        chatId = chatRef.id;
+        console.log("New chat created with ID:", chatId);
+        
+        // Add first message to Firestore subcollection
+        const messageData = {
+          text: message,
+          senderId: user.id,
+          senderName: user.name || user.email?.split('@')[0] || "User",
+          timestamp: Date.now(),
+          read: {
+            [user.id]: true,     // Read by sender
+            [product.userId]: false    // Not read by recipient
+          }
+        };
+        
+        await addDoc(collection(db, "chats", chatId, "messages"), messageData);
+        
+        // Add message to Realtime Database
+        const rtdbMessagesRef = ref(rtdb, `messages/${chatId}`);
+        await push(rtdbMessagesRef, {
+          text: message,
+          senderId: user.id,
+          senderName: user.name || user.email?.split('@')[0] || "User",
+          senderPhotoURL: user.photoURL || null,
+          timestamp: Date.now(),
+        });
+        
+        console.log("First message added to chat");
       }
-
-      // Create a new chat
-      const chatData = {
-        productId: product.id,
-        participants: [user.id, product.userId],
-        participantNames: {
-          [user.id]: user.name,
-          [product.userId]: product.userEmail.split('@')[0] // Simple name from email
-        },
-        participantPhotos: {
-          [user.id]: user.photoURL || "",
-          [product.userId]: "" // Assuming no photo available
-        },
-        createdAt: Date.now(),
-        adminJoined: false
-      };
-
-      const chatRef = await addDoc(collection(db, "chats"), chatData);
       
-      // Redirect to the new chat in the new interface
-      router.push(`/my-chats`);
-    } catch (err) {
-      console.error("Error creating chat:", err);
-      setError("Failed to initiate chat. Please try again.");
+      // Navigate to the chat
+      router.push(`/my-chats?chatId=${chatId}`);
+      
+    } catch (error) {
+      console.error("Error creating chat:", error);
+      setError("Failed to send message. Please try again later.");
     } finally {
-      setCreatingChat(false);
+      setIsSubmitting(false);
     }
   };
 
@@ -218,11 +279,11 @@ export default function ContactPage({ params }: ContactPageProps) {
         </Link>
         
         <button
-          onClick={createChat}
-          disabled={creatingChat}
+          onClick={handleContactSeller}
+          disabled={isSubmitting}
           className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors disabled:opacity-50"
         >
-          {creatingChat ? "Creating Chat..." : "Start Chat"}
+          {isSubmitting ? "Sending..." : "Start Chat"}
         </button>
       </div>
     </div>

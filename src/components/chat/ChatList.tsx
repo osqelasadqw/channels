@@ -5,8 +5,10 @@ import Image from "next/image";
 import Link from "next/link";
 import { useAuth } from "@/components/auth/AuthProvider";
 import { Chat } from "@/types/chat";
-import { collection, query, where, onSnapshot } from "firebase/firestore";
+import { collection, query, where, onSnapshot, doc, getDoc } from "firebase/firestore";
 import { db } from "@/firebase/config";
+
+const ADMIN_ID = "ADMIN_USER_ID"; // Defined ADMIN_ID
 
 export default function ChatList() {
   const [chats, setChats] = useState<Chat[]>([]);
@@ -20,32 +22,52 @@ export default function ChatList() {
     setLoading(true);
     setError(null);
 
-    // Get chats where the current user is a participant
-    const chatsQuery = query(
-      collection(db, "chats"),
-      where("participants", "array-contains", user.id)
-    );
+    const userChatListRef = collection(db, `users/${user.id}/chatList`);
+    const q = query(userChatListRef); // Potentially add orderBy timestamp here if chatList items have it
 
-    const unsubscribe = onSnapshot(
-      chatsQuery,
-      (snapshot) => {
-        const chatList = snapshot.docs.map((doc) => ({
-          id: doc.id,
-          ...doc.data()
-        } as Chat));
+    const unsubscribe = onSnapshot(q, async (snapshot) => {
+      try {
+        const chatReferences = snapshot.docs.map(docSnapshot => ({
+          id: docSnapshot.id, // This is the ID of the chat document in the main 'chats' collection
+          ...(docSnapshot.data() as { lastMessage?: string, timestamp?: number, productId?: string, productName?: string, isEscrowChat?: boolean }) // Include potential fields from user's chatList
+        }));
+
+        const chatPromises = chatReferences.map(async (refData) => {
+          const chatDocRef = doc(db, "chats", refData.id);
+          const chatDoc = await getDoc(chatDocRef);
+          if (chatDoc.exists()) {
+            // Merge data from user's chatList (like a custom lastMessage or productName for escrow) with actual chat data
+            // For escrow chats initiated by user, the `isEscrowChat` flag would be on the main chat document.
+            return {
+              id: chatDoc.id,
+              ...chatDoc.data(),
+              // Override or supplement with refData if necessary, e.g., if chatDoc doesn't have productName for some reason
+              productName: chatDoc.data().productName || refData.productName,
+            } as Chat;
+          }
+          return null;
+        });
+
+        const resolvedChats = (await Promise.all(chatPromises)).filter(chat => chat !== null) as Chat[];
         
-        // Sort by createdAt in descending order
-        chatList.sort((a, b) => b.createdAt - a.createdAt);
+        resolvedChats.sort((a, b) => {
+          const tsA = a.lastMessage?.timestamp || a.createdAt || 0;
+          const tsB = b.lastMessage?.timestamp || b.createdAt || 0;
+          return tsB - tsA;
+        });
         
-        setChats(chatList);
-        setLoading(false);
-      },
-      (err) => {
-        console.error("Error fetching chats:", err);
-        setError("Failed to load chats");
+        setChats(resolvedChats);
+      } catch (err) {
+        console.error("Error fetching or processing chats:", err);
+        setError("Failed to load chats.");
+      } finally {
         setLoading(false);
       }
-    );
+    }, (err) => {
+      console.error("Error in onSnapshot for user chat list:", err);
+      setError("Failed to listen for chat updates.");
+      setLoading(false);
+    });
 
     return () => unsubscribe();
   }, [user]);
@@ -82,7 +104,7 @@ export default function ChatList() {
 2.7 1.31 2.9 2.4.2.8.2 1.6 0 2.4" />
         </svg>
         <h3 className="text-lg font-medium mb-2">No Chats Yet</h3>
-        <p className="text-gray-500 mb-4">Start a conversation by contacting a seller</p>
+        <p className="text-gray-500 mb-4">Start a conversation by contacting a seller or requesting escrow.</p>
         <Link 
           href="/" 
           className="inline-block px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
@@ -96,63 +118,84 @@ export default function ChatList() {
   return (
     <div className="bg-white rounded-lg shadow-md divide-y">
       {chats.map((chat) => {
-        // Find the other participant's info
         const participants = chat.participants || [];
-        const otherParticipants = participants.filter(id => id !== user?.id);
-        const otherParticipantId = otherParticipants.length > 0 ? otherParticipants[0] : "";
+        const otherParticipantId = participants.find(id => id !== user?.id) || "";
         
-        // Safely access nested properties
-        const participantNames = chat.participantNames || {};
-        const participantPhotos = chat.participantPhotos || {};
-        
-        const otherParticipantName = otherParticipantId && participantNames[otherParticipantId] 
-          ? participantNames[otherParticipantId] 
-          : "Unknown User";
-          
-        const otherParticipantPhoto = otherParticipantId && participantPhotos[otherParticipantId]
-          ? participantPhotos[otherParticipantId]
-          : "";
+        let displayName = "Unknown User";
+        let displayPhoto = "";
+        let isAgent = false;
+
+        if (otherParticipantId === ADMIN_ID && chat.isEscrowChat === true) {
+          displayName = "Escrow Agent";
+          displayPhoto = "/images/agent.png"; // Ensure agent.png is in public/images/
+          isAgent = true;
+        } else if (otherParticipantId) {
+          displayName = chat.participantNames?.[otherParticipantId] || "User";
+          displayPhoto = chat.participantPhotos?.[otherParticipantId] || "";
+        }
+
+        const fallbackInitial = displayName.charAt(0).toUpperCase();
+
+        // Determine link: Escrow chats created from my-chats should link back to my-chats with params
+        // Regular chats might link to /chats/[id]
+        const chatLink = `/my-chats?chatId=${chat.id}${chat.productId ? `&productId=${chat.productId}` : ''}`;
 
         return (
           <Link 
             key={chat.id} 
-            href={`/chats/${chat.id}`}
+            href={chatLink}
             className="flex items-center p-4 hover:bg-gray-50 transition-colors"
           >
-            <div className="h-12 w-12 rounded-full overflow-hidden mr-4 flex-shrink-0">
-              {otherParticipantPhoto ? (
-                <Image
-                  src={otherParticipantPhoto}
-                  alt={otherParticipantName}
+            <div className="h-12 w-12 rounded-full overflow-hidden mr-4 flex-shrink-0 border border-gray-200 shadow-sm bg-gray-100 flex items-center justify-center">
+              {displayPhoto ? (
+                <Image 
+                  src={displayPhoto} 
+                  alt={displayName}
                   width={48}
                   height={48}
-                  className="h-full w-full object-cover"
+                  className={`h-full w-full ${isAgent ? 'object-contain p-0.5' : 'object-cover'}`}
+                  onError={(e) => { 
+                    // Attempt to hide the broken image and show fallback if possible
+                    const parent = e.currentTarget.parentElement;
+                    if (parent) {
+                      const fallback = parent.querySelector('.fallback-initial-div');
+                      if (fallback) (fallback as HTMLElement).style.display = 'flex';
+                    }
+                    e.currentTarget.style.display = 'none';
+                  }}
                 />
-              ) : (
-                <div className="h-full w-full bg-blue-500 flex items-center justify-center text-white">
-                  {otherParticipantName.charAt(0).toUpperCase()}
+              ) : null}
+              {/* Fallback visible if displayPhoto is empty OR if Image onError hid it */}
+              {!displayPhoto && (
+                 <div className="fallback-initial-div h-full w-full bg-gradient-to-br from-indigo-500 to-blue-500 flex items-center justify-center text-white font-medium">
+                  {fallbackInitial}
                 </div>
               )}
             </div>
             
             <div className="flex-1 min-w-0">
               <div className="flex justify-between items-baseline">
-                <h3 className="font-medium truncate">{otherParticipantName}</h3>
+                <h3 className="font-medium truncate text-gray-800">{displayName}</h3>
                 <span className="text-xs text-gray-500">
-                  {chat.lastMessage 
-                    ? new Date(chat.lastMessage.timestamp).toLocaleDateString() 
-                    : chat.createdAt ? new Date(chat.createdAt).toLocaleDateString() : "Unknown date"}
+                  {chat.lastMessage?.timestamp 
+                    ? new Date(chat.lastMessage.timestamp).toLocaleDateString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) 
+                    : chat.createdAt ? new Date(chat.createdAt).toLocaleDateString([], { month: 'short', day: 'numeric' }) : ""
+                  }
                 </span>
               </div>
               
-              <p className="text-sm text-gray-600 truncate">
-                {chat.lastMessage ? chat.lastMessage.text : "No messages yet"}
+              <p className={`text-sm truncate ${chat.lastMessage?.senderId === user?.id ? 'text-gray-500' : 'text-gray-700 font-medium'}`}>
+                 {chat.lastMessage?.senderId === user?.id && <span className="font-normal">შენ: </span>}
+                 {chat.lastMessage ? chat.lastMessage.text : (isAgent ? "Escrow chat initiated" : "No messages yet")}
               </p>
             </div>
             
-            {chat.adminJoined && (
-              <span className="ml-2 px-2 py-1 bg-green-100 text-green-800 text-xs rounded-full whitespace-nowrap">
-                Escrow Active
+            {(chat.isEscrowChat || isAgent) && (
+              <span className="ml-2 px-2.5 py-1 bg-indigo-100 text-indigo-700 text-xs font-semibold rounded-full whitespace-nowrap flex items-center">
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.8} stroke="currentColor" className="w-3.5 h-3.5 mr-1">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12c0 1.268-.63 2.39-1.593 3.068a3.745 3.745 0 01-1.043 3.296 3.745 3.745 0 01-3.296 1.043A3.745 3.745 0 0112 21c-1.268 0-2.39-.63-3.068-1.593a3.746 3.746 0 01-3.296-1.043 3.745 3.745 0 01-1.043-3.296A3.745 3.745 0 013 12c0-1.268.63-2.39 1.593-3.068a3.745 3.745 0 011.043-3.296 3.746 3.746 0 013.296-1.043A3.746 3.746 0 0112 3c1.268 0 2.39.63 3.068 1.593a3.746 3.746 0 013.296 1.043 3.746 3.746 0 011.043 3.296A3.745 3.745 0 0121 12z" />
+                </svg>
+                Escrow
               </span>
             )}
           </Link>

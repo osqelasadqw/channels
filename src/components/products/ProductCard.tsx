@@ -30,8 +30,8 @@ export default function ProductCard({ product, onContactSeller, className = "" }
 
   // სურათების პრი-ლოდინგი
   useEffect(() => {
-    // შემოწმება, რომ კოდი მუშაობს მხოლოდ ბრაუზერის გარემოში
-    if (typeof window !== 'undefined' && product.imageUrls.length > 1) {
+    // შემოწმება, რომ კოდი მუშაობს მხოლოდ ბრაუზერის გარემოში და არსებობს სურათები
+    if (typeof window !== 'undefined' && product.imageUrls && product.imageUrls.length > 1) {
       // პირველი სურათი არ ვტვირთავთ აქ, რადგან უკვე ჩატვირთულია მთავარი ლოგიკით
       for (let i = 1; i < product.imageUrls.length; i++) {
         // ვიყენებთ HTML HTMLImageElement ობიექტს, რომელიც ბრაუზერში ტვირთავს იმიჯებს
@@ -42,19 +42,25 @@ export default function ProductCard({ product, onContactSeller, className = "" }
   }, [product.imageUrls]);
 
   const nextImage = () => {
+    if (!product.imageUrls || product.imageUrls.length <= 1) return;
     setCurrentImageIndex((prev) => 
       prev === product.imageUrls.length - 1 ? 0 : prev + 1
     );
   };
 
   const prevImage = () => {
+    if (!product.imageUrls || product.imageUrls.length <= 1) return;
     setCurrentImageIndex((prev) => 
       prev === 0 ? product.imageUrls.length - 1 : prev - 1
     );
   };
 
   const handleContactClick = () => {
-    if (!user) return;
+    if (!user) {
+      // თუ მომხმარებელი არ არის რეგისტრირებული, გადავამისამართოთ რეგისტრაციის გვერდზე
+      window.location.href = '/login';
+      return;
+    }
     setShowContactModal(true);
   };
 
@@ -72,37 +78,47 @@ export default function ProductCard({ product, onContactSeller, className = "" }
 
   return (
     <div className={`bg-white rounded-lg shadow-md overflow-hidden transition-transform hover:shadow-lg ${className}`}>
-      <div className="relative aspect-video">
-        {product.imageUrls.length > 0 ? (
+      <div className="relative aspect-[4/3]">
+        {product.imageUrls && product.imageUrls.length > 0 ? (
           <>
-            <Image
-              src={product.imageUrls[currentImageIndex]}
-              alt={product.displayName}
-              fill
-              className="object-cover"
-              priority={true}
-              sizes="(max-width: 768px) 100vw, (max-width: 1200px) 50vw, 25vw"
-            />
-            {product.imageUrls.length > 1 && (
-              <div className="absolute inset-0 flex justify-between items-center">
-                <button 
-                  onClick={(e) => { e.preventDefault(); e.stopPropagation(); prevImage(); }}
-                  className="bg-black bg-opacity-50 text-white p-2 rounded-full ml-2 hover:bg-opacity-70"
-                >
-                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-4 h-4">
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5L8.25 12l7.5-7.5" />
-                  </svg>
-                </button>
-                <button 
-                  onClick={(e) => { e.preventDefault(); e.stopPropagation(); nextImage(); }}
-                  className="bg-black bg-opacity-50 text-white p-2 rounded-full mr-2 hover:bg-opacity-70"
-                >
-                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-4 h-4">
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
-                  </svg>
-                </button>
+            <Link href={`/products/${product.id}`} className="group block relative w-full h-full">
+              <Image
+                src={product.imageUrls[currentImageIndex]}
+                alt={product.displayName}
+                fill
+                className="object-cover transition-all group-hover:filter group-hover:blur-[1px] group-hover:brightness-75"
+                priority={true}
+                sizes="(max-width: 768px) 100vw, (max-width: 1200px) 50vw, 25vw"
+              />
+              
+              {/* ტექსტი, რომელიც გამოჩნდება hover-ზე */}
+              <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                <span className="bg-black bg-opacity-50 text-white px-4 py-2 rounded-md font-medium">
+                  View Details
+                </span>
               </div>
-            )}
+              
+              {product.imageUrls && product.imageUrls.length > 1 && (
+                <div className="absolute inset-0 flex justify-between items-center pointer-events-none">
+                  <button 
+                    onClick={(e) => { e.preventDefault(); e.stopPropagation(); prevImage(); }}
+                    className="bg-black bg-opacity-50 text-white p-2 rounded-full ml-2 hover:bg-opacity-70 pointer-events-auto"
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-4 h-4">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5L8.25 12l7.5-7.5" />
+                    </svg>
+                  </button>
+                  <button 
+                    onClick={(e) => { e.preventDefault(); e.stopPropagation(); nextImage(); }}
+                    className="bg-black bg-opacity-50 text-white p-2 rounded-full mr-2 hover:bg-opacity-70 pointer-events-auto"
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-4 h-4">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
+                    </svg>
+                  </button>
+                </div>
+              )}
+            </Link>
           </>
         ) : (
           <div className="w-full h-full flex items-center justify-center bg-gray-200">
@@ -129,19 +145,21 @@ export default function ProductCard({ product, onContactSeller, className = "" }
         </div>
 
         <div className="flex justify-between gap-2">
-          <Link 
-            href={`/products/${product.id}`}
-            className="flex-1 text-center px-4 py-2 bg-gray-100 rounded hover:bg-gray-200 transition-colors"
-          >
-            View Details
-          </Link>
-          {user && user.id !== product.userId && (
+          {user?.id !== product.userId && (
             <button
               onClick={handleContactClick}
-              className="flex-1 px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors"
+              className="w-full px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors"
             >
-              Contact Seller
+              Buy this channel
             </button>
+          )}
+          {user?.id === product.userId && (
+            <Link 
+              href={`/products/${product.id}`}
+              className="w-full text-center px-4 py-2 bg-gray-100 rounded hover:bg-gray-200 transition-colors"
+            >
+              See Details
+            </Link>
           )}
         </div>
       </div>
@@ -151,7 +169,7 @@ export default function ProductCard({ product, onContactSeller, className = "" }
         <div className="fixed inset-0 flex items-center justify-center z-50 p-4 backdrop-blur-sm bg-transparent">
           <div className="bg-white rounded-lg shadow-lg max-w-md w-full p-6 animate-fade-in">
             <div className="flex justify-between items-center mb-4">
-              <h3 className="text-xl font-bold">Contact Seller</h3>
+              <h3 className="text-xl font-bold">Buy this channel</h3>
               <button 
                 onClick={() => setShowContactModal(false)}
                 className="text-gray-500 hover:text-gray-700"
@@ -202,7 +220,7 @@ export default function ProductCard({ product, onContactSeller, className = "" }
                 >
                   <div className="flex items-center justify-center gap-2">
                     <svg viewBox="0 0 24 24" className="w-6 h-6" xmlns="http://www.w3.org/2000/svg">
-                      <path d="M23.64 14.906c-1.734 6.953-8.876 11.188-15.834 9.454-6.965-1.734-11.2-8.88-9.46-15.833C0.086 1.563 7.222-2.67 14.185.066c6.96 1.733 11.196 8.88 9.456 15.84Zm-11.14-7.434c.1.72-.437 1.108-1.18 1.366l.242 1.71 1.223.26-.193 1.348-1.22-.26-.932-.197-.3 1.349-1.11-.24.193-1.348-.932-.198.03-.24c-.048-.01-.097-.01-.146-.02l-1.084-.24.222-1.37.582.12c.31.06.582 0 .65-.36l.398-3.135c.03-.298-.097-.626-.64-.735l-.582-.12.22-1.368 1.088.24h.01l.912.2.21-1.348 1.108.24-.202 1.344 1.11.248.205-1.348 1.113.24-.205 1.35c1.944.437 2.952 1.326 2.684 2.877-.212 1.25-.86 1.745-1.99 1.808.873.5 1.273 1.22 1.088 2.284-.274 1.575-1.574 2.222-3.64 1.64l-.207 1.37-1.11-.24.204-1.348-.933-.197-.205 1.348-1.11-.24.205-1.348-1.967-.407.524-1.144s.815.164.806.154c.31.068.447-.115.5-.262l.417-2.935.03-.038c.01 0-.01-.02-.03-.03l-.415-3.04c-.06-.298-.252-.63-.68-.532.02-.3-.805-.173-.805-.173l-.33-1.2 1.864.415.932.2.193-1.35 1.11.24-.193 1.35zm-.067 6.322c-.417-.097-1.735-.417-1.784-.426-.05-.05-.007-.105-.05-.126-.125-.02-.077-.05-1.066-.053-1.106-.005-.04.003-.09.024-.125.02-.038.077-.077.175-.058.098.02 1.368.29 1.407.3.04.01.09.02.116.058.028.04.053.086.048.135-.005.05-.212 1.067-.222 1.108-.01.038-.028.107-.068.145-.04.038-.108.078-.184.058-.077-.02.145.032-.145-.03h.813Zm.68-2.38c-.515-.12-1.735-.428-1.784-.436-.05-.01-.106-.058-.127-.135-.02-.077-.05-1.066-.053-1.106-.005-.038.003-.086.024-.125.02-.038.077-.077.175-.058.098.02 1.368.29 1.407.3.04.01.09.02.116.057.028.04.054.086.048.135-.005.05-.212 1.067-.222 1.107-.01.04-.028.116-.068.145-.04.03-.106.077-.183.058-.078-.02.144.03-.144-.02h.813Z" fill="#F7931A" />
+                      <path d="M23.64 14.906c-1.734 6.953-8.876 11.188-15.834 9.454-6.965-1.734-11.2-8.88-9.46-15.833C0.086 1.563 7.222-2.67 14.185.066c6.96 1.733 11.196 8.88 9.456 15.84Zm-11.14-7.434c.1.72-.437 1.108-1.18 1.366l.242 1.71 1.223.26-.193 1.348-1.22-.26-.932-.197-.3 1.349-1.11-.24.193-1.348-.932-.198.03-.24c-.048-.01-.097-.01-.146-.02l-1.084-.24.222-1.37.582.12c.31.06.582 0 .65-.36l.398-3.135c.03-.298-.097-.626-.64-.735l-.582-.12.22-1.368 1.088.24h.01l.912.2.21-1.348 1.108.24-.202 1.344 1.11.248.205-1.348 1.113.24-.205 1.35c1.944.437 2.952 1.326 2.684 2.877-.212 1.25-.86 1.745-1.99 1.808.873.5 1.273 1.22 1.088 2.284-.274 1.575-1.574 2.222-3.64 1.64l-.207 1.37-1.11-.24.204-1.348-.933-.197-.205 1.348-1.11-.24.205-1.348-1.967-.407.524-1.144s.815.164.806.154c.31.068.447-.115.5-.262l.417-2.935.03-.038c.01 0-.01-.02-.03-.03l-.415-3.04c-.06-.298-.252-.63-.68-.532.02-.3-.805-.173-.805-.173l-.33-1.2 1.864.415.932.2.193-1.35 1.11.24-.193 1.35zm-.067 6.322c-.417-.097-1.735-.417-1.784-.426-.05-.05-.007-.105-.05-.126-.125-.02-.077-.05-1.066-.053-1.106-.005-.04.003-.09.024-.125.02-.038.077-.077.175-.058.098.02 1.368.29 1.407.3.04.01.09.02.116.058.028.04.053.086.048.135-.005.05-.212 1.067-.222 1.108-.01.038-.028.107-.068.145-.04.038-.108.078-.184.058-.077-.02.145.032-.145-.03h.813z" fill="#F7931A" />
                     </svg>
                     <span>Bitcoin</span>
                   </div>
@@ -257,7 +275,7 @@ export default function ProductCard({ product, onContactSeller, className = "" }
                     Connecting...
                   </>
                 ) : (
-                  "Contact Seller"
+                  "Buy this channel"
                 )}
               </button>
             </div>

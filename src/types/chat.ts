@@ -8,6 +8,7 @@ export interface Message {
   isAdmin?: boolean;
   isRequest?: boolean;
   isSystem?: boolean;
+  isEscrowRequest?: boolean;
   transactionData?: {
     productId: string;
     productName: string;
@@ -29,6 +30,10 @@ export interface Chat {
   createdAt: number;
   adminJoined?: boolean;
   hiddenBy?: string[];
+  isPrivateWithAdmin?: boolean;
+  isPrivateWithUser?: boolean;
+  isEscrowChat?: boolean;
+  originalChatId?: string;
 }
 
 export interface ChatState {

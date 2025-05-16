@@ -4,14 +4,13 @@ import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/components/auth/AuthProvider";
 import { ref, onValue, off, remove, set } from "firebase/database";
-import { doc, getDoc, updateDoc, collection, addDoc, query, where, onSnapshot, orderBy, getDocs } from "firebase/firestore";
+import { doc, getDoc, updateDoc, collection, addDoc, query, where, onSnapshot, orderBy, getDocs, deleteDoc } from "firebase/firestore";
 import { db, rtdb } from "@/firebase/config";
 
 interface AdminRequest {
   id: string;
   chatId: string;
   productId: string;
-  productName?: string;
   requestedBy: string;
   requestedByName: string;
   timestamp: number;
@@ -45,9 +44,16 @@ export default function AdminChatList() {
   const [selectedNotification, setSelectedNotification] = useState<WalletNotification | null>(null);
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [deleteConfirmation, setDeleteConfirmation] = useState<string | null>(null);
-  const [deleteRequestConfirmation, setDeleteRequestConfirmation] = useState<string | null>(null);
   const { user } = useAuth();
   const router = useRouter();
+
+  const handleOpenProductsModalEvent = () => {
+    window.dispatchEvent(new CustomEvent('openProductsModal'));
+  };
+
+  const handleOpenEscrowChatsModalEvent = () => {
+    window.dispatchEvent(new CustomEvent('openEscrowChatsModal'));
+  };
 
   useEffect(() => {
     if (!user || !user.isAdmin) return;
@@ -155,12 +161,20 @@ export default function AdminChatList() {
       // Remove the request
       await remove(ref(rtdb, `adminRequests/${request.id}`));
 
-      // Navigate to the chat - USING NEW URL FORMAT WITH QUERY PARAMETERS
+      // Log the chat we're navigating to
       console.log('Joining chat and navigating to:', request.chatId);
+      
+      // შევინახოთ ჩატის ID ლოკალურად
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('lastChatId', request.chatId);
+      }
+      
+      // გამოვიყენოთ query პარამეტრი, Next.js-ის სტანდარტული მიდგომა
       router.push(`/my-chats?chatId=${request.chatId}`);
     } catch (err) {
       console.error("Error joining chat:", err);
       setError("Failed to join chat");
+      alert("ჩატში გადასვლა ვერ მოხერხდა, გთხოვთ სცადოთ მოგვიანებით");
     } finally {
       setProcessing(null);
     }
@@ -171,18 +185,85 @@ export default function AdminChatList() {
     setShowDetailsModal(true);
   };
 
+  const handleJoinChatFromNotification = async (notification: WalletNotification) => {
+    if (!user || !user.isAdmin) return;
+
+    try {
+      setProcessing(notification.id);
+
+      // Get chat data to verify it exists
+      const chatDocRef = doc(db, "chats", notification.chatId);
+      const chatDoc = await getDoc(chatDocRef);
+      
+      if (!chatDoc.exists()) {
+        throw new Error("Chat not found");
+      }
+
+      // Check if admin is already part of the chat participants
+      const chatData = chatDoc.data();
+      if (!chatData.participants.includes(user.id)) {
+        // Update the chat to add admin as a participant
+        await updateDoc(chatDocRef, {
+          adminJoined: true,
+          participants: [...chatData.participants, user.id],
+          participantNames: {
+            ...chatData.participantNames,
+            [user.id]: user.name
+          },
+          participantPhotos: {
+            ...chatData.participantPhotos,
+            [user.id]: user.photoURL || ""
+          }
+        });
+
+        // Send a system message to the chat
+        const messagesRef = ref(rtdb, `messages/${notification.chatId}`);
+        const messageKey = Date.now().toString();
+        const messageRef = ref(rtdb, `messages/${notification.chatId}/${messageKey}`);
+        
+        await set(messageRef, {
+          text: "The escrow agent has joined the chat to assist with the transaction.",
+          senderId: "system",
+          senderName: "System",
+          timestamp: Date.now(),
+          isSystem: true
+        });
+      }
+
+      // Mark notification as read
+      await updateDoc(doc(db, "admin_notifications", notification.id), {
+        read: true
+      });
+
+      // Log the chat ID we're navigating to
+      console.log('Navigating to chat from wallet notification:', notification.chatId);
+      
+      // შევინახოთ ჩატის ID ლოკალურად
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('lastChatId', notification.chatId);
+      }
+      
+      // გამოვიყენოთ query პარამეტრი, Next.js-ის სტანდარტული მიდგომა
+      router.push(`/my-chats?chatId=${notification.chatId}`);
+    } catch (err) {
+      console.error("Error joining chat from notification:", err);
+      setError("Failed to join chat");
+      alert("ჩატში გადასვლა ვერ მოხერხდა, გთხოვთ სცადოთ მოგვიანებით");
+    } finally {
+      setProcessing(null);
+    }
+  };
+
   const handleDeleteNotification = async (notificationId: string) => {
     if (!user || !user.isAdmin) return;
 
     try {
       setProcessing(notificationId);
-      // Delete the notification from Firestore
-      await updateDoc(doc(db, "admin_notifications", notificationId), {
-        deleted: true,
-        deletedAt: Date.now()
-      });
       
-      // Update the local state to remove the deleted notification
+      // სრულად წავშალოთ შეტყობინება Firestore-დან
+      await deleteDoc(doc(db, "admin_notifications", notificationId));
+      
+      // განვაახლოთ ლოკალური state-ი წაშლილი შეტყობინების მოსაშორებლად
       setWalletNotifications(prevNotifications => 
         prevNotifications.filter(notification => notification.id !== notificationId)
       );
@@ -191,24 +272,6 @@ export default function AdminChatList() {
     } catch (err) {
       console.error("Error deleting notification:", err);
       setError("შეცდომა შეტყობინების წაშლისას");
-    } finally {
-      setProcessing(null);
-    }
-  };
-
-  const handleDeleteRequest = async (requestId: string) => {
-    if (!user || !user.isAdmin) return;
-
-    try {
-      setProcessing(requestId);
-      // წავშალოთ მოთხოვნა Firebase-ის რეალურ დროის ბაზიდან
-      await remove(ref(rtdb, `adminRequests/${requestId}`));
-      
-      // განახლდება ავტომატურად onValue ლისენერის გამო
-      setDeleteRequestConfirmation(null);
-    } catch (err) {
-      console.error("Error deleting request:", err);
-      setError("შეცდომა მოთხოვნის წაშლისას");
     } finally {
       setProcessing(null);
     }
@@ -268,34 +331,33 @@ export default function AdminChatList() {
 
   return (
     <div className="bg-gradient-to-br from-white to-gray-50 rounded-xl shadow-xl border border-gray-200 overflow-hidden w-full">
-      <div className="p-8 border-b bg-gradient-to-r from-gray-900 to-indigo-900 text-white">
-        <div className="flex items-start justify-between">
-          <div>
-            <h2 className="text-2xl font-bold flex items-center gap-3 text-white group">
-              <div className="relative">
-                <div className="absolute inset-0 bg-indigo-400 rounded-full blur-sm opacity-70 group-hover:opacity-100 transition-all duration-300"></div>
-                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-8 h-8 text-white relative">
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12c0 1.268-.63 2.39-1.593 3.068a3.745 3.745 0 01-1.043 3.296 3.745 3.745 0 01-3.296 1.043A3.745 3.745 0 0112 21c-1.268 0-2.39-.63-3.068-1.593a3.746 3.746 0 01-3.296-1.043 3.745 3.745 0 01-1.043-3.296A3.745 3.745 0 013 12c0-1.268.63-2.39 1.593-3.068a3.745 3.745 0 011.043-3.296 3.746 3.746 0 013.296-1.043A3.746 3.746 0 0112 3c1.268 0 2.39.63 3.068 1.593a3.746 3.746 0 013.296 1.043 3.746 3.746 0 011.043 3.296A3.745 3.745 0 0121 12z" />
-                </svg>
-              </div>
-              Escrow Agent Dashboard
-            </h2>
-            <p className="text-gray-300 mt-3 ml-11 text-sm font-light tracking-wide">
-              მართეთ ესქროუ სერვისები და ტრანზაქციების ვერიფიკაცია მაღალი უსაფრთხოებით
+      <div className="p-6 sm:p-8 border-b bg-gradient-to-r from-gray-800 to-indigo-900 text-white rounded-t-xl">
+        <div className="flex flex-col sm:flex-row items-start justify-between">
+          <div className="mb-4 sm:mb-0">
+            <h2 className="text-xl sm:text-2xl font-bold">Escrow Agent Dashboard</h2>
+            <p className="mt-1 text-sm text-indigo-200 max-w-xl">
+              მართეთ ესქროუ სერვისები და მომხმარებლების მოთხოვნები მაღალი უსაფრთხოებით.
             </p>
           </div>
-          <div className="hidden md:flex items-center space-x-2">
+          <div className="flex flex-col sm:flex-row space-y-2 sm:space-y-0 sm:space-x-2 w-full sm:w-auto">
             <button 
-              onClick={() => {
-                const event = new CustomEvent('openProductsModal');
-                window.dispatchEvent(event);
-              }}
-              className="px-4 py-3 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded flex items-center"
+              onClick={handleOpenProductsModalEvent}
+              className="w-full sm:w-auto inline-flex items-center justify-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-gray-800 focus:ring-blue-500 transition-colors duration-150 whitespace-nowrap"
             >
-              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2" viewBox="0 0 20 20" fill="currentColor">
-                <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM7 9a1 1 0 100-2 1 1 0 000 2zm7-1a1 1 0 11-2 0 1 1 0 012 0zm-7.536 5.879a1 1 0 001.415 0 3 3 0 014.242 0 1 1 0 001.415-1.415 5 5 0 00-7.072 0 1 1 0 000 1.415z" clipRule="evenodd" />
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-1.5" viewBox="0 0 20 20" fill="currentColor">
+                <path d="M17.414 2.586a2 2 0 00-2.828 0L7 10.172V13h2.828l7.586-7.586a2 2 0 000-2.828z" />
+                <path fillRule="evenodd" d="M2 6a2 2 0 012-2h4a1 1 0 010 2H4v10h10v-4a1 1 0 112 0v4a2 2 0 01-2 2H4a2 2 0 01-2-2V6z" clipRule="evenodd" />
               </svg>
               პროდუქტების მართვა
+            </button>
+            <button 
+              onClick={handleOpenEscrowChatsModalEvent}
+              className="w-full sm:w-auto inline-flex items-center justify-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-green-500 hover:bg-green-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-gray-800 focus:ring-green-500 transition-colors duration-150 whitespace-nowrap"
+            >
+               <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-1.5" fill="none" viewBox="0 0 24 24" strokeWidth={1.8} stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M7.5 8.25h9m-9 3H12m-9.75 1.51c0 1.6.8 3.11 2.19 4.024C6.07 18.332 7.5 19.5 9 19.5h6c1.5 0 2.93-1.168 3.99-2.715.32-.297.71-.53 1.13-.69M2.25 12l8.954-8.955c.44-.439 1.152-.439 1.591 0L21.75 12M4.5 9.75v10.125c0 .621.504 1.125 1.125 1.125H9.75v-4.875c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21h4.125c.621 0 1.125-.504 1.125-1.125V9.75" />
+              </svg>
+              პირადი ჩატები (Escrow)
             </button>
             <div className="px-4 py-3 flex items-center gap-2 rounded-lg bg-indigo-800 bg-opacity-50 border border-indigo-700">
               <span className="relative flex h-3 w-3">
@@ -307,154 +369,6 @@ export default function AdminChatList() {
           </div>
         </div>
       </div>
-      
-      {/* ესქროუ სერვისის მოთხოვნები */}
-      {requests.length > 0 && (
-        <div className="p-8 border-b relative overflow-hidden">
-          <div className="absolute -top-10 right-0 w-96 h-96 bg-blue-50 rounded-full blur-3xl opacity-20"></div>
-          <div className="relative">
-            <div className="flex items-center justify-between mb-6">
-              <h3 className="text-xl font-bold text-gray-800 flex items-center gap-3">
-                <div className="p-2 rounded-full bg-gradient-to-br from-blue-500 to-indigo-600 text-white shadow-lg shadow-blue-200">
-                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-6 h-6">
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12c0 1.268-.63 2.39-1.593 3.068a3.745 3.745 0 01-1.043 3.296 3.745 3.745 0 01-3.296 1.043A3.745 3.745 0 0112 21c-1.268 0-2.39-.63-3.068-1.593a3.746 3.746 0 01-3.296-1.043 3.745 3.745 0 01-1.043-3.296A3.745 3.745 0 013 12c0-1.268.63-2.39 1.593-3.068a3.745 3.745 0 011.043-3.296 3.746 3.746 0 013.296-1.043A3.746 3.746 0 0112 3c1.268 0 2.39.63 3.068 1.593a3.746 3.746 0 013.296 1.043 3.746 3.746 0 011.043 3.296A3.745 3.745 0 0121 12z" />
-                  </svg>
-                </div>
-                ესქროუ მოთხოვნები
-                <span className="ml-2 px-3 py-1 text-xs font-semibold rounded-full bg-blue-100 text-blue-800 border border-blue-200">
-                  {requests.length}
-                </span>
-              </h3>
-            </div>
-            
-            <div className="overflow-hidden rounded-xl border border-gray-200 shadow-lg">
-              <div className="overflow-x-auto overflow-y-auto max-h-[60vh]" style={{ scrollbarWidth: 'thin', scrollbarColor: '#d1d5db #f3f4f6' }}>
-                <table className="min-w-full divide-y divide-gray-200">
-                  <thead>
-                    <tr className="bg-gradient-to-r from-blue-700 to-indigo-600">
-                      <th scope="col" className="px-6 py-4 text-left text-xs font-semibold text-white uppercase tracking-wider">
-                        პროდუქტი
-                      </th>
-                      <th scope="col" className="px-6 py-4 text-left text-xs font-semibold text-white uppercase tracking-wider">
-                        მომხმარებელი
-                      </th>
-                      <th scope="col" className="px-6 py-4 text-left text-xs font-semibold text-white uppercase tracking-wider">
-                        თარიღი
-                      </th>
-                      <th scope="col" className="px-6 py-4 text-center text-xs font-semibold text-white uppercase tracking-wider">
-                        მოქმედება
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody className="bg-white divide-y divide-gray-200">
-                    {requests.map((request, idx) => (
-                      <tr key={request.id} 
-                          className={idx % 2 === 0 ? 'bg-white' : 'bg-gray-50'} 
-                          style={{transition: 'all 0.2s'}}
-                          onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#eff6ff'}
-                          onMouseLeave={(e) => e.currentTarget.style.backgroundColor = idx % 2 === 0 ? '#ffffff' : '#f9fafb'}>
-                        <td className="px-6 py-4 whitespace-nowrap">
-                          <div className="flex items-center">
-                            <div className="flex-shrink-0 h-10 w-10 rounded-lg bg-blue-100 flex items-center justify-center shadow-sm">
-                              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5 text-blue-600">
-                                <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 21v-7.5a.75.75 0 01.75-.75h3a.75.75 0 01.75.75V21m-4.5 0H2.36m11.14 0H18m0 0h3.64m-1.39 0V9.349m-16.5 11.65V9.35m0 0a3.001 3.001 0 003.75-.615A2.993 2.993 0 009.75 9.75c.896 0 1.7-.393 2.25-1.016a2.993 2.993 0 002.25 1.016c.896 0 1.7-.393 2.25-1.016a3.001 3.001 0 003.75.614m-16.5 0a3.004 3.004 0 01-.621-4.72L4.318 3.44A1.5 1.5 0 015.378 3h13.243a1.5 1.5 0 011.06.44l1.19 1.189a3 3 0 01-.621 4.72m-13.5 8.65h3.75a.75.75 0 00.75-.75V13.5a.75.75 0 00-.75-.75H6.75a.75.75 0 00-.75.75v3.75c0 .415.336.75.75.75z" />
-                              </svg>
-                            </div>
-                            <div className="ml-4">
-                              <div className="text-sm font-medium text-gray-900 truncate max-w-[150px]">
-                                {request.productName || 'უცნობი პროდუქტი'}
-                              </div>
-                              <div className="text-xs text-gray-500 font-mono truncate max-w-[150px]">
-                                {request.productId}
-                              </div>
-                            </div>
-                          </div>
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap">
-                          <div className="text-sm text-gray-900">{request.requestedByName}</div>
-                          <div className="text-xs text-gray-500 font-mono">{request.requestedBy}</div>
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-xs text-gray-500">
-                          <div className="flex items-center bg-gray-50 px-3 py-2 rounded-lg border border-gray-200">
-                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4 text-gray-500 mr-1.5">
-                              <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" />
-                            </svg>
-                            {new Date(request.timestamp).toLocaleString()}
-                          </div>
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-center">
-                          <div className="flex space-x-2 justify-center">
-                            <button 
-                              onClick={() => handleJoinChat(request)}
-                              disabled={processing === request.id}
-                              className="inline-flex items-center justify-center px-3 py-1.5 text-sm font-medium rounded-lg 
-                                        bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-sm
-                                        hover:from-blue-700 hover:to-indigo-700 focus:outline-none focus:ring-1">
-                              {processing === request.id ? (
-                                <svg className="animate-spin h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                                </svg>
-                              ) : (
-                                <>
-                                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4 mr-1">
-                                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                                  </svg>
-                                  შეუერთდი
-                                </>
-                              )}
-                            </button>
-                            
-                            {deleteRequestConfirmation === request.id ? (
-                              <div className="flex space-x-1">
-                                <button
-                                  onClick={() => handleDeleteRequest(request.id)}
-                                  disabled={processing === request.id}
-                                  className="inline-flex items-center justify-center px-3 py-1.5 text-sm font-medium rounded-lg bg-red-600 text-white shadow-sm hover:bg-red-700 focus:outline-none focus:ring-1">
-                                  {processing === request.id ? (
-                                    <svg className="animate-spin h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                                    </svg>
-                                  ) : (
-                                    <>
-                                      <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4 mr-1">
-                                        <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
-                                      </svg>
-                                      დიახ
-                                    </>
-                                  )}
-                                </button>
-                                <button 
-                                  onClick={() => setDeleteRequestConfirmation(null)}
-                                  className="inline-flex items-center justify-center px-3 py-1.5 text-sm font-medium rounded-lg bg-gray-400 text-white shadow-sm hover:bg-gray-500 focus:outline-none focus:ring-1">
-                                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4 mr-1">
-                                    <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                                  </svg>
-                                  არა
-                                </button>
-                              </div>
-                            ) : (
-                              <button
-                                onClick={() => setDeleteRequestConfirmation(request.id)}
-                                className="inline-flex items-center justify-center px-3 py-1.5 text-sm font-medium rounded-lg bg-red-100 text-red-700 shadow-sm hover:bg-red-200 focus:outline-none focus:ring-1">
-                                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4 mr-1">
-                                  <path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" />
-                                </svg>
-                                წაშლა
-                              </button>
-                            )}
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
       
       {walletNotifications.length > 0 && (
         <div className="p-8 border-b relative overflow-hidden">
@@ -615,10 +529,7 @@ export default function AdminChatList() {
                         <td className="px-6 py-4 whitespace-nowrap text-center">
                           <div className="flex space-x-2 justify-center">
                             <button 
-                              onClick={() => {
-                                console.log('Navigating to chat (table):', notification.chatId);
-                                router.push(`/my-chats?chatId=${notification.chatId}`);
-                              }}
+                              onClick={() => handleJoinChatFromNotification(notification)}
                               className="inline-flex items-center justify-center px-3 py-1.5 text-sm font-medium rounded-lg 
                                       bg-gradient-to-r from-emerald-600 to-green-600 text-white shadow-sm
                                       hover:from-emerald-700 hover:to-green-700 focus:outline-none focus:ring-1">
@@ -768,24 +679,31 @@ export default function AdminChatList() {
             {/* Modal Footer */}
             <div className="p-4 bg-gray-50 rounded-b-xl border-t border-gray-200 flex justify-end space-x-3">
                 <button 
-                onClick={() => {
-                  console.log('Navigating to chat (modal):', selectedNotification.chatId);
-                  router.push(`/my-chats?chatId=${selectedNotification.chatId}`);
-                }}
-                 className="inline-flex items-center justify-center px-5 py-2 text-sm font-medium rounded-lg 
+                  onClick={() => handleJoinChatFromNotification(selectedNotification)}
+                  disabled={processing === selectedNotification.id}
+                  className="inline-flex items-center justify-center px-5 py-2 text-sm font-medium rounded-lg 
                           bg-gradient-to-r from-emerald-600 to-green-600 text-white shadow-lg shadow-green-200
                           hover:from-emerald-700 hover:to-green-700 focus:outline-none focus:ring-2 
                           focus:ring-offset-2 focus:ring-green-500 transition-all duration-200 transform hover:scale-105">
-                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4 mr-2">
-                     <path strokeLinecap="round" strokeLinejoin="round" d="M7.5 8.25h9m-9 3H12m-9.75 1.51c0 1.6.8 3.11 2.19 4.024C6.07 18.332 7.5 19.5 9 19.5h6c1.5 0 2.93-1.168 3.99-2.715.32-.297.71-.53 1.13-.69M2.25 12l8.954-8.955c.44-.439 1.152-.439 1.591 0L21.75 12M4.5 9.75v10.125c0 .621.504 1.125 1.125 1.125H9.75v-4.875c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21h4.125c.621 0 1.125-.504 1.125-1.125V9.75" />
-                   </svg>
-                 ჩატში გადასვლა
-               </button>
-              <button 
-                onClick={() => setShowDetailsModal(false)}
-                className="px-5 py-2 text-sm font-medium text-gray-700 bg-white rounded-lg border border-gray-300 hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition-colors">
-                დახურვა
-              </button>
+                  {processing === selectedNotification.id ? (
+                    <div className="flex items-center justify-center">
+                      <div className="animate-spin h-5 w-5 mr-2 border-2 border-white border-t-transparent rounded-full"></div>
+                      <span>დაელოდეთ...</span>
+                    </div>
+                  ) : (
+                    <>
+                      <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4 mr-2">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M7.5 8.25h9m-9 3H12m-9.75 1.51c0 1.6.8 3.11 2.19 4.024C6.07 18.332 7.5 19.5 9 19.5h6c1.5 0 2.93-1.168 3.99-2.715.32-.297.71-.53 1.13-.69M2.25 12l8.954-8.955c.44-.439 1.152-.439 1.591 0L21.75 12M4.5 9.75v10.125c0 .621.504 1.125 1.125 1.125H9.75v-4.875c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21h4.125c.621 0 1.125-.504 1.125-1.125V9.75" />
+                      </svg>
+                      <span>შეუერთდი ჩატს</span>
+                    </>
+                  )}
+                </button>
+                <button 
+                  onClick={() => setShowDetailsModal(false)}
+                  className="px-5 py-2 text-sm font-medium text-gray-700 bg-white rounded-lg border border-gray-300 hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition-colors">
+                  დახურვა
+                </button>
             </div>
           </div>
         </div>

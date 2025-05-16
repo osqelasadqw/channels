@@ -119,13 +119,18 @@ export default function ChatInterface({ chatId, productId }: ChatInterfaceProps)
       
       const timestamp = Date.now();
       
+      // Check if this is an escrow request message
+      const isEscrowRequest = newMessage.trim().includes("🔒 Request to Purchase");
+      
       await push(messagesRef, {
         text: newMessage.trim(),
         senderId: user.id,
         senderName: user.name,
         senderPhotoURL: user.photoURL || null,
         timestamp: timestamp,
-        isAdmin: user.isAdmin
+        isAdmin: user.isAdmin,
+        // If this is an escrow message, we'll use the special formatting
+        isEscrowRequest: isEscrowRequest
       });
       
       // განვაახლოთ ჩატში lastMessage ველი, რომ ჩატების სიაში სწორად გამოჩნდეს მესიჯი
@@ -211,6 +216,8 @@ export default function ChatInterface({ chatId, productId }: ChatInterfaceProps)
 
       setIsSubmittingWallet(true);
       try {
+        console.log("Saving wallet address with user ID:", user?.id);
+        
         // Save the wallet address in Firebase
         await addDoc(collection(db, "wallet_addresses"), {
           userId: user?.id,
@@ -258,22 +265,29 @@ export default function ChatInterface({ chatId, productId }: ChatInterfaceProps)
         // Confirm that the address is saved
         setIsWalletSubmitted(true);
 
-        // Add a message to the chat indicating the wallet address was added successfully
-        const messagesRef = ref(rtdb, `messages/${chatId}`);
-        await push(messagesRef, {
-          text: `Wallet address added successfully: ${walletAddress}`,
-          senderId: user?.id || '',
-          senderName: user?.name || '',
-          senderPhotoURL: user?.photoURL || null,
-          timestamp: Date.now(),
-        });
+        // Remove the chat message - only show the visual indication of success
       } catch (error) {
         console.error("Error saving wallet address:", error);
-        alert("Failed to save wallet address. Please try again later.");
+        
+        // დეტალური შეცდომის შეტყობინება სადებაგოდ
+        if (error instanceof Error) {
+          console.error("Error message:", error.message);
+          console.error("Error stack:", error.stack);
+        }
+        
+        // შევამოწმოთ თუ ეს ფაირბეისის შეცდომაა
+        if (error && typeof error === 'object' && 'code' in error) {
+          console.error("Firebase error code:", (error as any).code);
+        }
+        
+        alert("ანგარიშის დეტალების შენახვა ვერ მოხერხდა. გთხოვთ სცადოთ მოგვიანებით.");
       } finally {
         setIsSubmittingWallet(false);
       }
     };
+
+    // Check if this is an escrow request message
+    const isEscrowRequest = (message.isEscrowRequest || (message.text && message.text.includes("🔒 Request to Purchase")));
 
     // Special transaction request message
     if (message.isRequest && message.transactionData) {
@@ -281,40 +295,60 @@ export default function ChatInterface({ chatId, productId }: ChatInterfaceProps)
       const isSeller = user?.id !== message.senderId; // If the user is not the sender of the message, they are the seller
       
       return (
-        <div className="p-4 mb-4 rounded-lg border border-gray-200 bg-indigo-50">
-          <div className="flex items-center mb-3">
-            <div className="p-2 rounded-full bg-indigo-600 text-white mr-2">
-              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z" />
-              </svg>
-            </div>
-            <h3 className="font-bold">🔒 Request to Purchase {productName}</h3>
+        <div className="p-6 mb-4 rounded-xl border-2 border-indigo-200 bg-white shadow-md">
+          <div className="flex items-start mb-4">
+            <h3 className="text-xl font-bold text-gray-800">Request to purchase <span className="text-blue-600">"{productName}"</span></h3>
           </div>
           
-          <div className="mb-3 space-y-1 text-sm text-gray-700">
-            <div>Transaction ID: {transactionId}</div>
-            <div>Transaction Amount: ${price}</div>
-            <div>Payment Method: {paymentMethod === 'stripe' ? 'Stripe' : 'Bitcoin'}</div>
+          <div className="mb-4">
+            <div className="grid grid-cols-1 gap-2 text-gray-800">
+              <div className="flex flex-col">
+                <span className="font-medium">Transaction ID: <span className="font-normal">{transactionId}</span></span>
+              </div>
+              <div className="flex flex-col">
+                <span className="font-medium">Transaction amount: <span className="font-normal">${price}</span></span>
+              </div>
+              <div className="flex flex-col">
+                <span className="font-medium">Transfer to: <span className="font-normal">{
+                  message.text && message.text.includes("Transfer to:") 
+                    ? message.text.split("Transfer to:")[1].split("\n")[0].trim()
+                    : "seller@example.com"
+                }</span></span>
+              </div>
+            </div>
           </div>
           
-          {useEscrow ? (
-            <div className="text-xs text-gray-600 mt-3 border-t border-gray-200 pt-3">
-              <p className="mb-1">The buyer pays the cost of the channel + 8% ($3 minimum) service fee.</p>
-              <p className="mb-1">The seller confirms and agrees to use the escrow service.</p>
-              <p className="mb-1">The escrow agent verifies everything and assigns manager rights to the buyer.</p>
-              <p className="mb-1">After 7 days (or sooner if agreed), the escrow agent removes other managers and transfers full ownership to the buyer.</p>
-              <p>The funds are then released to the seller. Payments are sent instantly via all major payment methods.</p>
-            </div>
-          ) : (
-            <div className="text-xs text-gray-600 mt-3 border-t border-gray-200 pt-3">
-              <p>Direct purchase without escrow service</p>
+          {useEscrow && (
+            <div className="mb-4">
+              <div className="flex items-center justify-between mb-2">
+                <h4 className="font-medium text-gray-800">Transaction steps when using the escrow service:</h4>
+              </div>
+              
+              <div className="flex space-x-4 mb-2">
+                <div className="w-1/2 h-1 bg-blue-500 rounded-full"></div>
+                <div className="w-1/2 h-1 bg-gray-200 rounded-full"></div>
+              </div>
+              
+              <div className="text-sm text-gray-700 space-y-2 mt-4">
+                <p><span className="font-medium">1.</span> The buyer pays a 4-8% ($3 minimum) service fee.</p>
+                <p><span className="font-medium">2.</span> The seller designates the escrow agent as manager.</p>
+                <p><span className="font-medium">3.</span> After 7 days, the seller assigns primary ownership rights to the escrow agent (7 days is the minimum amount of time required in order to assign a new primary owner in the control panel).</p>
+                <p><span className="font-medium">4.</span> The escrow agent verifies everything, removes the other managers, and notifies the buyer to pay the seller.</p>
+                <p><span className="font-medium">5.</span> The buyer pays the seller.</p>
+                <p><span className="font-medium">6.</span> After the seller's confirmation, the escrow agent assigns ownership rights to the buyer.</p>
+              </div>
             </div>
           )}
+          
+          <div className="rounded-lg border border-blue-100 bg-blue-50 p-4 mt-4">
+            <div className="font-medium text-blue-800 mb-1">Transaction status:</div>
+            <p className="text-blue-700">Waiting for seller to agree to the terms of the transaction.</p>
+          </div>
           
           {/* Input form for the seller's wallet address */}
           {isSeller && !isWalletSubmitted && (
             <div className="mt-4 border-t border-gray-200 pt-4">
-              <div className="mb-2 text-sm font-medium">
+              <div className="mb-2 text-sm font-semibold text-gray-700">
                 {paymentMethod === 'bitcoin' 
                   ? 'Please enter your Bitcoin wallet address:'
                   : 'Please enter your Stripe account details:'}
@@ -325,12 +359,13 @@ export default function ChatInterface({ chatId, productId }: ChatInterfaceProps)
                   value={walletAddress}
                   onChange={(e) => setWalletAddress(e.target.value)}
                   placeholder={paymentMethod === 'bitcoin' ? 'Bitcoin Address' : 'Stripe Account Email'}
-                  className="flex-1 border border-gray-300 rounded-md px-3 py-2 text-sm"
+                  className={`flex-1 border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-300 focus:border-blue-300 focus:outline-none ${isWalletSubmitted ? 'bg-gray-100 border-gray-200 text-gray-500' : 'border-gray-300'}`}
+                  disabled={isWalletSubmitted}
                 />
                 <button
                   onClick={handleSubmitWalletAddress}
                   disabled={!walletAddress.trim() || isSubmittingWallet}
-                  className="bg-blue-600 text-white px-4 py-2 rounded-md text-sm disabled:bg-blue-400 disabled:cursor-not-allowed"
+                  className="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed hover:bg-blue-700 transition-all"
                 >
                   {isSubmittingWallet ? (
                     <div className="flex items-center">
@@ -338,7 +373,7 @@ export default function ChatInterface({ chatId, productId }: ChatInterfaceProps)
                       <span>Processing...</span>
                     </div>
                   ) : (
-                    'Add Address'
+                    'Submit Account Details'
                   )}
                 </button>
               </div>
@@ -348,20 +383,259 @@ export default function ChatInterface({ chatId, productId }: ChatInterfaceProps)
           {/* If wallet address is added */}
           {isSeller && isWalletSubmitted && (
             <div className="mt-4 border-t border-gray-200 pt-4">
-              <div className="flex items-center text-green-600">
-                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5 mr-2">
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
-                <span className="text-sm">Wallet address added successfully!</span>
+              <div className="flex items-center justify-between">
+                <div className="flex items-center bg-green-50 text-green-700 p-3 rounded-lg border border-green-200">
+                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5 mr-2 text-green-500">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                  <span className="font-medium">Account details added successfully!</span>
+                </div>
+                <div className="pulse-animation">
+                  <div className="w-3 h-3 bg-green-500 rounded-full"></div>
+                </div>
+              </div>
+              <style jsx>{`
+                .pulse-animation {
+                  display: flex;
+                  align-items: center;
+                  justify-content: center;
+                }
+                .pulse-animation div {
+                  animation: pulse 1.5s infinite;
+                }
+                @keyframes pulse {
+                  0% {
+                    transform: scale(0.95);
+                    box-shadow: 0 0 0 0 rgba(74, 222, 128, 0.7);
+                  }
+                  70% {
+                    transform: scale(1);
+                    box-shadow: 0 0 0 10px rgba(74, 222, 128, 0);
+                  }
+                  100% {
+                    transform: scale(0.95);
+                    box-shadow: 0 0 0 0 rgba(74, 222, 128, 0);
+                  }
+                }
+              `}</style>
+            </div>
+          )}
+        </div>
+      );
+    }
+    
+    // For escrow request (new format)
+    if (isEscrowRequest) {
+      // Extract details from message
+      const messageLines = message.text.split('\n');
+      let transactionId = '';
+      let amount = '';
+      let paymentMethod = '';
+      let productName = '';
+      
+      // Parse message to extract info
+      messageLines.forEach(line => {
+        if (line.includes('Transaction ID:')) {
+          transactionId = line.split('Transaction ID:')[1].trim();
+        } else if (line.includes('Transaction Amount:')) {
+          amount = line.split('Transaction Amount:')[1].trim();
+        } else if (line.includes('Payment Method:')) {
+          paymentMethod = line.split('Payment Method:')[1].trim();
+        } else if (line.includes('🔒 Request to Purchase')) {
+          // Create the productName from the part after "Request to Purchase"
+          productName = line.split('🔒 Request to Purchase')[1].trim();
+        }
+      });
+      
+      // Determine if the current user is the seller (not the sender of the escrow request)
+      const isSeller = user?.id !== message.senderId;
+      
+      return (
+        <div className="p-6 mb-4 rounded-xl border-2 border-indigo-200 bg-white shadow-md">
+          <div className="flex items-start mb-4">
+            <div className="mr-2 text-blue-600">
+              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-6 h-6">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z" />
+              </svg>
+            </div>
+            <h3 className="text-xl font-bold text-gray-800">Request to purchase <span className="text-blue-600">{productName}</span></h3>
+          </div>
+          
+          <div className="mb-4">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-gray-800">
+              <div className="flex flex-col p-3 bg-gray-50 rounded-lg border border-gray-100">
+                <span className="text-xs text-gray-500 mb-1">Transaction ID</span>
+                <span className="font-medium">{transactionId}</span>
+              </div>
+              <div className="flex flex-col p-3 bg-gray-50 rounded-lg border border-gray-100">
+                <span className="text-xs text-gray-500 mb-1">Amount</span>
+                <span className="font-medium">{amount}</span>
+              </div>
+              <div className="flex flex-col p-3 bg-gray-50 rounded-lg border border-gray-100">
+                <span className="text-xs text-gray-500 mb-1">Payment Method</span>
+                <span className="font-medium">{paymentMethod}</span>
+              </div>
+            </div>
+          </div>
+          
+          <div className="mb-4 bg-blue-50 p-4 rounded-lg border border-blue-100">
+            <h4 className="font-medium text-blue-800 mb-3">Escrow Service Process:</h4>
+            <ol className="space-y-2 text-sm text-blue-700">
+              <li className="flex items-start">
+                <span className="bg-blue-200 text-blue-800 w-5 h-5 rounded-full flex items-center justify-center mr-2 flex-shrink-0 font-medium">1</span>
+                <span>The buyer pays the cost of the channel + 8% ($3 minimum) service fee.</span>
+              </li>
+              <li className="flex items-start">
+                <span className="bg-blue-200 text-blue-800 w-5 h-5 rounded-full flex items-center justify-center mr-2 flex-shrink-0 font-medium">2</span>
+                <span>The seller confirms and agrees to use the escrow service.</span>
+              </li>
+              <li className="flex items-start">
+                <span className="bg-blue-200 text-blue-800 w-5 h-5 rounded-full flex items-center justify-center mr-2 flex-shrink-0 font-medium">3</span>
+                <span>The escrow agent verifies everything and assigns manager rights to the buyer.</span>
+              </li>
+              <li className="flex items-start">
+                <span className="bg-blue-200 text-blue-800 w-5 h-5 rounded-full flex items-center justify-center mr-2 flex-shrink-0 font-medium">4</span>
+                <span>After 7 days (or sooner if agreed), the escrow agent removes other managers and transfers full ownership to the buyer.</span>
+              </li>
+              <li className="flex items-start">
+                <span className="bg-blue-200 text-blue-800 w-5 h-5 rounded-full flex items-center justify-center mr-2 flex-shrink-0 font-medium">5</span>
+                <span>The funds are then released to the seller. Payments are sent instantly via all major payment methods.</span>
+              </li>
+            </ol>
+          </div>
+          
+          <div className="rounded-lg border border-green-100 bg-green-50 p-4">
+            <div className="flex items-center mb-2">
+              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5 mr-2 text-green-600">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              <div className="font-medium text-green-800">Transaction Status:</div>
+            </div>
+            <p className="text-green-700">Your escrow request is being processed. Please wait for confirmation.</p>
+          </div>
+
+          {/* Input form for the seller's wallet address - for the escrow request format */}
+          {isSeller && !isWalletSubmitted && (
+            <div className="mt-4 border-t border-gray-200 pt-4">
+              <div className="mb-2 text-sm font-semibold text-gray-700">
+                {paymentMethod.toLowerCase().includes('bitcoin') 
+                  ? 'შეიყვანეთ თქვენი ბიტკოინის ანგარიშის მისამართი:'
+                  : 'შეიყვანეთ თქვენი Stripe ანგარიშის დეტალები:'}
+              </div>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={walletAddress}
+                  onChange={(e) => setWalletAddress(e.target.value)}
+                  placeholder={paymentMethod.toLowerCase().includes('bitcoin') ? 'Bitcoin Address' : 'Stripe Account Email'}
+                  className={`flex-1 border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-300 focus:border-blue-300 focus:outline-none ${isWalletSubmitted ? 'bg-gray-100 border-gray-200 text-gray-500' : 'border-gray-300'}`}
+                  disabled={isWalletSubmitted}
+                />
+                <button
+                  onClick={async () => {
+                    if (!walletAddress.trim()) return;
+                    
+                    setIsSubmittingWallet(true);
+                    try {
+                      // Create a derived transaction ID from the message if not available directly
+                      const derivedTransactionId = parseInt(transactionId) || Math.floor(1000000 + Math.random() * 9000000);
+                      const amountValue = parseFloat(amount.replace('$', '')) || 0;
+                      
+                      // Save the wallet address in Firebase
+                      await addDoc(collection(db, "wallet_addresses"), {
+                        userId: user?.id,
+                        chatId: chatId,
+                        transactionId: derivedTransactionId,
+                        paymentMethod: paymentMethod,
+                        address: walletAddress,
+                        createdAt: Date.now()
+                      });
+                      
+                      // Send a notification to the admin notifications collection
+                      await addDoc(collection(db, "admin_notifications"), {
+                        type: "wallet_added",
+                        chatId,
+                        productId: chatData?.productId || '',
+                        productName: productName || chatData?.productName || 'Unknown Product',
+                        transactionId: derivedTransactionId,
+                        buyerName: message.senderName || "Unknown Buyer",
+                        buyerId: message.senderId,
+                        sellerName: user?.name || 'Unknown Seller',
+                        sellerId: user?.id,
+                        paymentMethod: paymentMethod,
+                        amount: amountValue,
+                        walletAddress,
+                        createdAt: Date.now(),
+                        read: false
+                      });
+                      
+                                            // Removed the chat message - won't send message to chat anymore
+                      
+                      // Update state to show success
+                      setIsWalletSubmitted(true);
+                    } catch (error) {
+                                             console.error("Error submitting wallet address:", error);
+                       alert("ანგარიშის დეტალების წარდგენა ვერ მოხერხდა. გთხოვთ სცადოთ მოგვიანებით.");
+                    } finally {
+                      setIsSubmittingWallet(false);
+                    }
+                  }}
+                  disabled={!walletAddress.trim() || isSubmittingWallet}
+                  className="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed hover:bg-blue-700 transition-all"
+                >
+                  {isSubmittingWallet ? (
+                    <div className="flex items-center">
+                      <div className="animate-spin h-4 w-4 mr-2 border-2 border-white border-t-transparent rounded-full"></div>
+                      <span>მიმდინარეობს...</span>
+                    </div>
+                  ) : (
+                    'ანგარიშის დეტალების წარდგენა'
+                  )}
+                </button>
               </div>
             </div>
           )}
           
-          <div className="mt-4 flex justify-end">
-            <span className="text-xs text-gray-500">
-              {new Date(message.timestamp).toLocaleString()}
-            </span>
-          </div>
+          {/* If wallet address is added - for the escrow request format */}
+          {isSeller && isWalletSubmitted && (
+            <div className="mt-4 border-t border-gray-200 pt-4">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center bg-green-50 text-green-700 p-3 rounded-lg border border-green-200">
+                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5 mr-2 text-green-500">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                  <span className="font-medium">ანგარიშის დეტალები წარმატებით დაემატა!</span>
+                </div>
+                <div className="pulse-animation">
+                  <div className="w-3 h-3 bg-green-500 rounded-full"></div>
+                </div>
+              </div>
+              <style jsx>{`
+                .pulse-animation {
+                  display: flex;
+                  align-items: center;
+                  justify-content: center;
+                }
+                .pulse-animation div {
+                  animation: pulse 1.5s infinite;
+                }
+                @keyframes pulse {
+                  0% {
+                    transform: scale(0.95);
+                    box-shadow: 0 0 0 0 rgba(74, 222, 128, 0.7);
+                  }
+                  70% {
+                    transform: scale(1);
+                    box-shadow: 0 0 0 10px rgba(74, 222, 128, 0);
+                  }
+                  100% {
+                    transform: scale(0.95);
+                    box-shadow: 0 0 0 0 rgba(74, 222, 128, 0);
+                  }
+                }
+              `}</style>
+            </div>
+          )}
         </div>
       );
     }
@@ -555,6 +829,31 @@ export default function ChatInterface({ chatId, productId }: ChatInterfaceProps)
             >
               <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5">
                 <path strokeLinecap="round" strokeLinejoin="round" d="M15.182 15.182a4.5 4.5 0 01-6.364 0M21 12a9 9 0 11-18 0 9 9 0 0118 0zM9.75 9.75c0 .414-.168.75-.375.75S9 10.164 9 9.75 9.168 9 9.375 9s.375.336.375.75zm-.375 0h.008v.015h-.008V9.75zm5.625 0c0 .414-.168.75-.375.75s-.375-.336-.375-.75.168-.75.375-.75.375.336.375.75zm-.375 0h.008v.015h-.008V9.75z" />
+              </svg>
+            </button>
+            
+            <button
+              type="button"
+              className="text-gray-400 hover:text-indigo-500 transition-colors"
+              title="Insert escrow request template"
+              onClick={() => {
+                setNewMessage(`🔒 Request to Purchase ოქტოპუსი / Octopus
+Transaction ID: 1736366
+Transaction Amount: $12
+Payment Method: Stripe
+The buyer pays the cost of the channel + 8% ($3 minimum) service fee.
+
+The seller confirms and agrees to use the escrow service.
+
+The escrow agent verifies everything and assigns manager rights to the buyer.
+
+After 7 days (or sooner if agreed), the escrow agent removes other managers and transfers full ownership to the buyer.
+
+The funds are then released to the seller. Payments are sent instantly via all major payment methods.`);
+              }}
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z" />
               </svg>
             </button>
             

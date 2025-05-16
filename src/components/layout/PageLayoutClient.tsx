@@ -9,7 +9,7 @@ interface PageLayoutClientProps {
 export default function PageLayoutClient({ children }: PageLayoutClientProps) {
   return (
     <>
-      <main className="flex-grow">
+      <main className="flex-grow w-full">
         {children}
       </main>
     </>
