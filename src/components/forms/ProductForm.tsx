@@ -172,6 +172,73 @@ export default function ProductForm() {
       normalizedLink = normalizedLink.replace(/^(https?:\/\/)?(www\.)?/, "");
       normalizedLink = normalizedLink.replace(/\/$/, "");
       
+      // YouTube ლინკის დამატებითი ნორმალიზაცია
+      if (normalizedLink.includes("youtube.com") || normalizedLink.includes("youtu.be")) {
+        // განვასხვავოთ youtube არხის ფორმატები და ვსცადოთ მათი ნორმალიზაცია
+        const youtubePatterns = [
+          /youtube\.com\/channel\/([^\/\?]+)/,  // channel ID-ით
+          /youtube\.com\/c\/([^\/\?]+)/,         // მოკლე სახელით
+          /youtube\.com\/@([^\/\?]+)/,          // @ სიმბოლოიანი სახელით
+          /youtube\.com\/user\/([^\/\?]+)/      // ძველი ფორმატის სახელით
+        ];
+        
+        let channelIdentifier = null;
+        
+        // შევამოწმოთ თითოეული პატერნი
+        for (const pattern of youtubePatterns) {
+          const match = normalizedLink.match(pattern);
+          if (match && match[1]) {
+            channelIdentifier = match[1];
+            break;
+          }
+        }
+        
+        // თუ ვიპოვეთ არხის იდენტიფიკატორი, ვიყენებთ მას ძიებისთვის
+        if (channelIdentifier) {
+          console.log("Extracted channel identifier:", channelIdentifier);
+          
+          // Firestore ძიება შემოსული ლინკის ან იდენტიფიკატორის მიხედვით
+          const channelsRef = collection(db, "products");
+          
+          // შევქმნათ ვარიანტები იდენტიფიკატორის გამოყენებით
+          const variantsWithIdentifier = [
+            `youtube.com/channel/${channelIdentifier}`,
+            `youtube.com/c/${channelIdentifier}`,
+            `youtube.com/@${channelIdentifier}`,
+            `youtube.com/user/${channelIdentifier}`
+          ];
+          
+          // შევამოწმოთ თითოეული ვარიანტი
+          for (const variant of variantsWithIdentifier) {
+            try {
+              const q = query(
+                channelsRef, 
+                where("accountLink", "==", `https://${variant}`)
+              );
+              
+              const querySnapshot = await getDocs(q);
+              
+              if (!querySnapshot.empty) {
+                // დამატებითი ფილტრაცია კოდში
+                const userId = user?.id;
+                const isUploadedByOther = querySnapshot.docs.some(doc => {
+                  const data = doc.data();
+                  return userId ? data.userId !== userId : true;
+                });
+                
+                if (isUploadedByOther) {
+                  setIsChannelAlreadyUploaded(true);
+                  return true;
+                }
+              }
+            } catch (e) {
+              console.error("Error in channel query:", e);
+              continue;
+            }
+          }
+        }
+      }
+      
       // Firestore ძიება - ყველა შესაძლო ვარიანტისთვის
       const channelsRef = collection(db, "products");
       
@@ -246,7 +313,10 @@ export default function ProductForm() {
       
       // შევამოწმოთ არსებობს თუ არა უკვე ეს არხი
       if (formData.accountLink.trim()) {
-        await checkIfChannelExists(formData.accountLink);
+        const channelExists = await checkIfChannelExists(formData.accountLink);
+        if (channelExists) {
+          setIsValidChannel(false);
+        }
       }
       
       // ავტომატურად გადართვა იუთუბზე თუ იუთუბის ლინკია
@@ -259,12 +329,12 @@ export default function ProductForm() {
       
       // თუ პლატფორმა იუთუბია, უნდა სრულად შემოწმდეს
       if (formData.platform === "YouTube") {
-        if (isValidYoutubeLink) {
+        if (isValidYoutubeLink && !isChannelAlreadyUploaded) {
           fetchYoutubeChannelData(formData.accountLink);
         } else {
           setIsValidChannel(false);
         }
-      } else if (formData.accountLink) {
+      } else if (formData.accountLink && !isChannelAlreadyUploaded) {
         // სხვა პლატფორმებისთვის საკმარისია უბრალოდ ბმულის არსებობა
         setIsValidChannel(formData.accountLink.trim() !== "");
       } else {
@@ -273,7 +343,7 @@ export default function ProductForm() {
     }, 1000); // 1 second delay after typing finished
     
     return () => clearTimeout(timeoutId);
-  }, [formData.accountLink, formData.platform]);
+  }, [formData.accountLink, formData.platform, isChannelAlreadyUploaded]);
 
   // აქვე ვაინიციალიზებთ დეფოლტ მნიშვნელობებს
   useEffect(() => {
@@ -384,10 +454,10 @@ export default function ProductForm() {
       return;
     }
     
-    // შევამოწმოთ არხი ატვირთვის წინ
+    // შევამოწმოთ არხი ატვირთვის წინ ხელახლა
     const channelExists = await checkIfChannelExists(formData.accountLink);
-    if (channelExists) {
-      setError("ეს არხი უკვე ატვირთულია სისტემაში");
+    if (channelExists || isChannelAlreadyUploaded) {
+      setError("ეს არხი უკვე ატვირთულია სისტემაში. დუბლირება აკრძალულია.");
       return;
     }
 
@@ -511,7 +581,7 @@ $${formData.expenses} — expense (month)`;
             onChange={handleChange}
             placeholder="Channel Link"
             required
-            className={`w-full px-3 py-2 border ${isChannelAlreadyUploaded ? 'border-red-300' : 'border-gray-300'} rounded-md focus:outline-none focus:ring-2 focus:ring-blue-400`}
+            className={`w-full px-3 py-2 border ${isChannelAlreadyUploaded ? 'border-red-500 bg-red-50' : 'border-gray-300'} rounded-md focus:outline-none focus:ring-2 focus:ring-blue-400`}
           />
           {isLoading && (
             <div className="absolute right-3 top-1/2 transform -translate-y-1/2">
@@ -524,11 +594,11 @@ $${formData.expenses} — expense (month)`;
         </div>
         
         {isChannelAlreadyUploaded && (
-          <div className="bg-red-50 border border-red-300 text-red-700 px-4 py-2 rounded mb-4 flex items-center">
-            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5 mr-2 text-red-500">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" />
+          <div className="bg-red-100 border-2 border-red-400 text-red-700 px-4 py-3 rounded mb-4 flex items-center">
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-6 h-6 mr-2 text-red-600">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
             </svg>
-            <span>ეს არხი უკვე ატვირთულია!</span>
+            <span className="font-bold">ეს არხი უკვე ატვირთულია! არხების დუბლირება აკრძალულია.</span>
           </div>
         )}
         
