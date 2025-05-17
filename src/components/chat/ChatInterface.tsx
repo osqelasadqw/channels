@@ -4,10 +4,11 @@ import { useState, useEffect, useRef } from "react";
 import Image from "next/image";
 import { useAuth } from "@/components/auth/AuthProvider";
 import { Chat, Message } from "@/types/chat";
-import { db, rtdb } from "@/firebase/config";
+import { db, rtdb, functions, auth } from "@/firebase/config";
 import { ref, push, onValue, off } from "firebase/database";
 import { doc, getDoc, updateDoc } from "firebase/firestore";
 import { addDoc, collection } from "firebase/firestore";
+import { httpsCallable } from "firebase/functions";
 
 interface ChatInterfaceProps {
   chatId: string;
@@ -22,6 +23,9 @@ export default function ChatInterface({ chatId, productId }: ChatInterfaceProps)
   const [chatData, setChatData] = useState<Chat | null>(null);
   const { user } = useAuth();
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const [walletAddress, setWalletAddress] = useState<string>("");
+  const [isSubmittingWallet, setIsSubmittingWallet] = useState<boolean>(false);
+  const [isWalletSubmitted, setIsWalletSubmitted] = useState<boolean>(false);
 
   // Fetch chat data and messages
   useEffect(() => {
@@ -202,89 +206,103 @@ export default function ChatInterface({ chatId, productId }: ChatInterfaceProps)
     }
   };
 
-  // Message item component displayed in the chat
-  const MessageItem = ({ message }: { message: Message }) => {
-    const { user } = useAuth();
-    const isOwn = message.senderId === user?.id;
-    const [walletAddress, setWalletAddress] = useState<string>("");
-    const [isSubmittingWallet, setIsSubmittingWallet] = useState<boolean>(false);
-    const [isWalletSubmitted, setIsWalletSubmitted] = useState<boolean>(false);
+  // Save seller's wallet address
+  const handleSubmitWalletAddress = async () => {
+    if (!walletAddress) return;
 
-    // Save seller's wallet address
-    const handleSubmitWalletAddress = async () => {
-      if (!walletAddress.trim() || !message.transactionData) return;
-
-      setIsSubmittingWallet(true);
-      try {
-        console.log("Saving wallet address with user ID:", user?.id);
-        
-        // Save the wallet address in Firebase
-        await addDoc(collection(db, "wallet_addresses"), {
-          userId: user?.id,
-          productId: message.transactionData.productId,
-          transactionId: message.transactionData.transactionId,
-          paymentMethod: message.transactionData.paymentMethod,
-          address: walletAddress,
-          createdAt: Date.now()
-        });
-
-        // Get product name from transaction data
-        const productName = message.transactionData.productName || 'Unknown Product';
-        
-        // Get chat data for participants
-        const chatDocRef = doc(db, "chats", chatId);
-        const chatDoc = await getDoc(chatDocRef);
-        
-        // Get buyer info
-        let buyerName = 'Unknown Buyer';
-        if (chatDoc.exists()) {
-          const chatData = chatDoc.data();
-          if (chatData.participantNames && chatData.participantNames[message.senderId]) {
-            buyerName = chatData.participantNames[message.senderId];
-          }
-        }
-        
-        // Send a notification to the admin notifications collection
+    setIsSubmittingWallet(true);
+    try {
+      console.log("Processing payment with method:", walletAddress);
+      
+      if (walletAddress === 'bitcoin') {
+        // Bitcoin გადახდის ლოგიკა
+        // Create a notification for the admin
         await addDoc(collection(db, "admin_notifications"), {
-          type: "wallet_added",
+          type: "payment_intent",
           chatId,
-          productId: message.transactionData.productId,
-          productName: productName,
-          transactionId: message.transactionData.transactionId,
-          buyerName,
-          buyerId: message.senderId,
-          sellerName: user?.name || 'Unknown Seller',
-          sellerId: user?.id,
-          paymentMethod: message.transactionData.paymentMethod,
-          amount: message.transactionData.price,
-          walletAddress,
+          productId: chatData?.productId || '',
+          productName: chatData?.productName || 'Unknown Product',
+          buyerName: user?.name || "Unknown Buyer",
+          buyerId: user?.id,
+          paymentMethod: walletAddress,
           createdAt: Date.now(),
           read: false
         });
 
-        // Confirm that the address is saved
+        // Show success message
         setIsWalletSubmitted(true);
+      } else if (walletAddress === 'card') {
+        try {
+          // მივიღოთ მომხმარებლის ტოკენი
+          const token = auth.currentUser ? await auth.currentUser.getIdToken() : '';
 
-        // Remove the chat message - only show the visual indication of success
-      } catch (error) {
-        console.error("Error saving wallet address:", error);
-        
-        // დეტალური შეცდომის შეტყობინება სადებაგოდ
-        if (error instanceof Error) {
-          console.error("Error message:", error.message);
-          console.error("Error stack:", error.stack);
+          // მივიღოთ current window საიტის origin-ი
+          const origin = window.location.origin;
+          console.log("Current origin:", origin);
+
+          // fetch-ის გამოყენებით გამოვიძახოთ HTTP ფუნქცია
+          const response = await fetch('https://us-central1-projec-cca43.cloudfunctions.net/createPaymentSessionHttp', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${token}`,
+              'Origin': origin
+            },
+            body: JSON.stringify({
+              chatId,
+              userId: user?.id,
+              origin: origin // დავამატოთ origin პარამეტრიც
+            }),
+          });
+          
+          if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+          }
+          
+          const data = await response.json();
+          console.log("Payment session created successfully:", data);
+          
+          // გადავამისამართოთ Stripe Checkout გვერდზე
+          window.location.href = data.url;
+          return; // ვწყვეტთ ფუნქციას, რადგან Stripe checkout გვერდზე გადადის
+        } catch (fetchError) {
+          console.error("Fetch error:", fetchError);
+          // ჩავარდნის შემთხვევაში ვცადოთ ძველი მეთოდით
+          console.log("Falling back to httpsCallable method");
+          
+          try {
+            const createSession = httpsCallable(functions, "createPaymentSession");
+            const result = await createSession({ 
+              chatId,
+              origin: window.location.origin
+            });
+            const data = result.data as { url: string };
+            
+            console.log("Payment session created successfully with fallback:", data);
+            
+            // გადავამისამართოთ Stripe Checkout გვერდზე
+            window.location.href = data.url;
+            return; // ვწყვეტთ ფუნქციას, რადგან Stripe checkout გვერდზე გადადის
+          } catch (error) {
+            console.error("Error initiating Stripe payment:", error);
+            alert("Failed to initiate credit card payment. Please try again.");
+            setIsSubmittingWallet(false);
+            return;
+          }
         }
-        
-        // შევამოწმოთ თუ ეს ფაირბეისის შეცდომაა
-        if (error && typeof error === 'object' && 'code' in error) {
-          console.error("Firebase error code:", (error as any).code);
-        }
-        
-        alert("ანგარიშის დეტალების შენახვა ვერ მოხერხდა. გთხოვთ სცადოთ მოგვიანებით.");
-      } finally {
-        setIsSubmittingWallet(false);
       }
-    };
+    } catch (error) {
+      console.error("Error processing payment:", error);
+      alert("Failed to process payment. Please try again later.");
+    } finally {
+      setIsSubmittingWallet(false);
+    }
+  };
+
+  // Message item component displayed in the chat
+  const MessageItem = ({ message }: { message: Message }) => {
+    const { user } = useAuth();
+    const isOwn = message.senderId === user?.id;
 
     // Check if this is an escrow request message
     const isEscrowRequest = (message.isEscrowRequest || (message.text && message.text.includes("🔒 Request to Purchase")));
@@ -342,30 +360,40 @@ export default function ChatInterface({ chatId, productId }: ChatInterfaceProps)
           
           <div className="rounded-lg border border-blue-100 bg-blue-50 p-4 mt-4">
             <div className="font-medium text-blue-800 mb-1">Transaction status:</div>
-            <p className="text-blue-700">Waiting for seller to agree to the terms of the transaction.</p>
+            <p className="text-blue-700">The terms of the transaction were confirmed. When you send your payment, the seller will be notified, and will need to transfer the account login details based on the agreed upon terms. If the seller does not respond, of breaks the rules, you can call upon the escrow agent (button below).</p>
           </div>
           
-          {/* Input form for the seller's wallet address */}
-          {isSeller && !isWalletSubmitted && (
+          {/* Input form for payment method selection - visible to both buyer and seller */}
+          {!isWalletSubmitted && (
             <div className="mt-4 border-t border-gray-200 pt-4">
               <div className="mb-2 text-sm font-semibold text-gray-700">
-                {paymentMethod === 'bitcoin' 
-                  ? 'Please enter your Bitcoin wallet address:'
-                  : 'Please enter your Stripe account details:'}
+                Please select payment method:
               </div>
               <div className="flex gap-2">
-                <input
-                  type="text"
-                  value={walletAddress}
-                  onChange={(e) => setWalletAddress(e.target.value)}
-                  placeholder={paymentMethod === 'bitcoin' ? 'Bitcoin Address' : 'Stripe Account Email'}
-                  className={`flex-1 border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-300 focus:border-blue-300 focus:outline-none ${isWalletSubmitted ? 'bg-gray-100 border-gray-200 text-gray-500' : 'border-gray-300'}`}
-                  disabled={isWalletSubmitted}
-                />
+                <button
+                  onClick={() => setWalletAddress('bitcoin')}
+                  className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+                    walletAddress === 'bitcoin' 
+                      ? 'bg-blue-600 text-white' 
+                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                  }`}
+                >
+                  Bitcoin
+                </button>
+                <button
+                  onClick={() => setWalletAddress('card')}
+                  className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+                    walletAddress === 'card' 
+                      ? 'bg-blue-600 text-white' 
+                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                  }`}
+                >
+                  Card
+                </button>
                 <button
                   onClick={handleSubmitWalletAddress}
-                  disabled={!walletAddress.trim() || isSubmittingWallet}
-                  className="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed hover:bg-blue-700 transition-all"
+                  disabled={!walletAddress || isSubmittingWallet}
+                  className="ml-auto bg-green-600 text-white px-4 py-2 rounded-lg text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed hover:bg-green-700 transition-all"
                 >
                   {isSubmittingWallet ? (
                     <div className="flex items-center">
@@ -373,22 +401,25 @@ export default function ChatInterface({ chatId, productId }: ChatInterfaceProps)
                       <span>Processing...</span>
                     </div>
                   ) : (
-                    'Submit Account Details'
+                    'Pay the fee'
                   )}
                 </button>
+              </div>
+              <div className="mt-2 text-xs text-gray-500">
+                Note: Paying with card will redirect you to Stripe's secure payment page for a fee of 8% of the product price.
               </div>
             </div>
           )}
           
-          {/* If wallet address is added */}
-          {isSeller && isWalletSubmitted && (
+          {/* If payment method is selected */}
+          {isWalletSubmitted && (
             <div className="mt-4 border-t border-gray-200 pt-4">
               <div className="flex items-center justify-between">
                 <div className="flex items-center bg-green-50 text-green-700 p-3 rounded-lg border border-green-200">
                   <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5 mr-2 text-green-500">
                     <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                   </svg>
-                  <span className="font-medium">Account details added successfully!</span>
+                  <span className="font-medium">Payment processing! The seller will be notified soon.</span>
                 </div>
                 <div className="pulse-animation">
                   <div className="w-3 h-3 bg-green-500 rounded-full"></div>
@@ -504,107 +535,68 @@ export default function ChatInterface({ chatId, productId }: ChatInterfaceProps)
             </ol>
           </div>
           
-          <div className="rounded-lg border border-green-100 bg-green-50 p-4">
-            <div className="flex items-center mb-2">
-              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5 mr-2 text-green-600">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
-              <div className="font-medium text-green-800">Transaction Status:</div>
-            </div>
-            <p className="text-green-700">Your escrow request is being processed. Please wait for confirmation.</p>
+          <div className="rounded-lg border border-blue-100 bg-blue-50 p-4 mt-4">
+            <div className="font-medium text-blue-800 mb-1">Transaction status:</div>
+            <p className="text-blue-700">The terms of the transaction were confirmed. When you send your payment, the seller will be notified, and will need to transfer the account login details based on the agreed upon terms. If the seller does not respond, of breaks the rules, you can call upon the escrow agent (button below).</p>
           </div>
 
-          {/* Input form for the seller's wallet address - for the escrow request format */}
-          {isSeller && !isWalletSubmitted && (
+          {/* Input form for the buyer's payment method selection */}
+          {!isSeller && !isWalletSubmitted && (
             <div className="mt-4 border-t border-gray-200 pt-4">
               <div className="mb-2 text-sm font-semibold text-gray-700">
-                {paymentMethod.toLowerCase().includes('bitcoin') 
-                  ? 'შეიყვანეთ თქვენი ბიტკოინის ანგარიშის მისამართი:'
-                  : 'შეიყვანეთ თქვენი Stripe ანგარიშის დეტალები:'}
+                Please select payment method:
               </div>
               <div className="flex gap-2">
-                <input
-                  type="text"
-                  value={walletAddress}
-                  onChange={(e) => setWalletAddress(e.target.value)}
-                  placeholder={paymentMethod.toLowerCase().includes('bitcoin') ? 'Bitcoin Address' : 'Stripe Account Email'}
-                  className={`flex-1 border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-300 focus:border-blue-300 focus:outline-none ${isWalletSubmitted ? 'bg-gray-100 border-gray-200 text-gray-500' : 'border-gray-300'}`}
-                  disabled={isWalletSubmitted}
-                />
                 <button
-                  onClick={async () => {
-                    if (!walletAddress.trim()) return;
-                    
-                    setIsSubmittingWallet(true);
-                    try {
-                      // Create a derived transaction ID from the message if not available directly
-                      const derivedTransactionId = parseInt(transactionId) || Math.floor(1000000 + Math.random() * 9000000);
-                      const amountValue = parseFloat(amount.replace('$', '')) || 0;
-                      
-                      // Save the wallet address in Firebase
-                      await addDoc(collection(db, "wallet_addresses"), {
-                        userId: user?.id,
-                        chatId: chatId,
-                        transactionId: derivedTransactionId,
-                        paymentMethod: paymentMethod,
-                        address: walletAddress,
-                        createdAt: Date.now()
-                      });
-                      
-                      // Send a notification to the admin notifications collection
-                      await addDoc(collection(db, "admin_notifications"), {
-                        type: "wallet_added",
-                        chatId,
-                        productId: chatData?.productId || '',
-                        productName: productName || chatData?.productName || 'Unknown Product',
-                        transactionId: derivedTransactionId,
-                        buyerName: message.senderName || "Unknown Buyer",
-                        buyerId: message.senderId,
-                        sellerName: user?.name || 'Unknown Seller',
-                        sellerId: user?.id,
-                        paymentMethod: paymentMethod,
-                        amount: amountValue,
-                        walletAddress,
-                        createdAt: Date.now(),
-                        read: false
-                      });
-                      
-                                            // Removed the chat message - won't send message to chat anymore
-                      
-                      // Update state to show success
-                      setIsWalletSubmitted(true);
-                    } catch (error) {
-                                             console.error("Error submitting wallet address:", error);
-                       alert("ანგარიშის დეტალების წარდგენა ვერ მოხერხდა. გთხოვთ სცადოთ მოგვიანებით.");
-                    } finally {
-                      setIsSubmittingWallet(false);
-                    }
-                  }}
-                  disabled={!walletAddress.trim() || isSubmittingWallet}
-                  className="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed hover:bg-blue-700 transition-all"
+                  onClick={() => setWalletAddress('bitcoin')}
+                  className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+                    walletAddress === 'bitcoin' 
+                      ? 'bg-blue-600 text-white' 
+                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                  }`}
+                >
+                  Bitcoin
+                </button>
+                <button
+                  onClick={() => setWalletAddress('card')}
+                  className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+                    walletAddress === 'card' 
+                      ? 'bg-blue-600 text-white' 
+                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                  }`}
+                >
+                  Card
+                </button>
+                <button
+                  onClick={handleSubmitWalletAddress}
+                  disabled={!walletAddress || isSubmittingWallet}
+                  className="ml-auto bg-green-600 text-white px-4 py-2 rounded-lg text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed hover:bg-green-700 transition-all"
                 >
                   {isSubmittingWallet ? (
                     <div className="flex items-center">
                       <div className="animate-spin h-4 w-4 mr-2 border-2 border-white border-t-transparent rounded-full"></div>
-                      <span>მიმდინარეობს...</span>
+                      <span>Processing...</span>
                     </div>
                   ) : (
-                    'ანგარიშის დეტალების წარდგენა'
+                    'Pay the fee'
                   )}
                 </button>
+              </div>
+              <div className="mt-2 text-xs text-gray-500">
+                Note: Paying with card will redirect you to Stripe's secure payment page for a fee of 8% of the product price.
               </div>
             </div>
           )}
           
-          {/* If wallet address is added - for the escrow request format */}
-          {isSeller && isWalletSubmitted && (
+          {/* If payment method is selected */}
+          {isWalletSubmitted && (
             <div className="mt-4 border-t border-gray-200 pt-4">
               <div className="flex items-center justify-between">
                 <div className="flex items-center bg-green-50 text-green-700 p-3 rounded-lg border border-green-200">
                   <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5 mr-2 text-green-500">
                     <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                   </svg>
-                  <span className="font-medium">ანგარიშის დეტალები წარმატებით დაემატა!</span>
+                  <span className="font-medium">Payment processing! The seller will be notified soon.</span>
                 </div>
                 <div className="pulse-animation">
                   <div className="w-3 h-3 bg-green-500 rounded-full"></div>
