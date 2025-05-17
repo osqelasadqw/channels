@@ -4,6 +4,7 @@ import { getAuth } from 'firebase/auth';
 import { getFirestore } from 'firebase/firestore';
 import { getStorage } from 'firebase/storage';
 import { getDatabase } from 'firebase/database';
+import { getFunctions } from 'firebase/functions';
 
 // Firebase კონფიგურაცია
 const firebaseConfig = {
@@ -23,6 +24,7 @@ const auth = getAuth(app);
 const db = getFirestore(app);
 const storage = getStorage(app);
 const rtdb = getDatabase(app);
+const functions = getFunctions(app);
 
 // ლოგირება დებაგისთვის
 if (typeof window !== 'undefined') {
@@ -32,4 +34,4 @@ if (typeof window !== 'undefined') {
   console.log("Realtime database initialized");
 }
 
-export { app, auth, db, storage, rtdb }; 
+export { app, auth, db, storage, rtdb, functions }; 

@@ -21,6 +21,7 @@ export interface Product {
   verificationCode: string;
   income?: number;
   monetization?: boolean;
+  channelLogo?: string;
 }
 
 export interface ProductFormData {
@@ -40,4 +41,5 @@ export interface ProductFormData {
   supportRequirements: string;
   images: File[];
   verificationCode: string;
+  channelLogo?: string;
 } 

@@ -34,9 +34,27 @@ interface WalletNotification {
   read: boolean;
 }
 
+// გადახდის შეტყობინების ინტერფეისი
+interface PaymentNotification {
+  id: string;
+  type: 'payment_completed';
+  chatId: string;
+  productId: string;
+  productName: string;
+  buyerId: string;
+  paymentSessionId: string;
+  paymentAmount: number;
+  createdAt: number;
+  read: boolean;
+  priority: string;
+  needsAction: boolean;
+  status: string;
+}
+
 export default function AdminChatList() {
   const [requests, setRequests] = useState<AdminRequest[]>([]);
   const [walletNotifications, setWalletNotifications] = useState<WalletNotification[]>([]);
+  const [paymentNotifications, setPaymentNotifications] = useState<PaymentNotification[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [processing, setProcessing] = useState<string | null>(null);
@@ -111,9 +129,47 @@ export default function AdminChatList() {
       }
     );
 
+    // გადახდის შეტყობინებების მიღება
+    const paymentNotificationsQuery = query(
+      walletNotificationsRef,
+      where("type", "==", "payment_completed")
+    );
+    
+    const unsubscribePaymentNotifications = onSnapshot(
+      paymentNotificationsQuery,
+      (snapshot) => {
+        const notificationsList: PaymentNotification[] = [];
+        snapshot.forEach((doc) => {
+          notificationsList.push({
+            id: doc.id,
+            ...doc.data()
+          } as PaymentNotification);
+        });
+        notificationsList.sort((a, b) => b.createdAt - a.createdAt);
+        setPaymentNotifications(notificationsList);
+      },
+      (error) => {
+        console.error("Error fetching payment notifications:", error);
+      }
+    );
+    
+    // რეალური დროის ნოტიფიკაციების მოსმენა
+    const adminNotificationsRef = ref(rtdb, "adminNotifications");
+    
+    onValue(adminNotificationsRef, (snapshot) => {
+      const data = snapshot.val();
+      if (data) {
+        console.log("New admin notification received:", data);
+        // არ დაგვჭირდება ნოტიფიკაციების დამატებით განახლება, რადგან 
+        // Firestore-ის onSnapshot ისედაც განაახლებს ავტომატურად
+      }
+    });
+
     return () => {
       off(adminRequestsRef);
+      off(adminNotificationsRef);
       unsubscribeWalletNotifications();
+      unsubscribePaymentNotifications();
     };
   }, [user]);
 
@@ -314,7 +370,7 @@ export default function AdminChatList() {
     );
   }
 
-  if (requests.length === 0 && walletNotifications.length === 0) {
+  if (requests.length === 0 && walletNotifications.length === 0 && paymentNotifications.length === 0) {
     return (
       <div className="text-center py-20 bg-gradient-to-br from-gray-50 to-gray-100 rounded-xl shadow-xl border border-gray-200">
         <div className="relative w-24 h-24 mx-auto mb-4">

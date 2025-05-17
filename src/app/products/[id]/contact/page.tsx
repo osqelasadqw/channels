@@ -27,7 +27,6 @@ export default function ContactPage({ params }: ContactPageProps) {
   const { user } = useAuth();
   const router = useRouter();
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [message, setMessage] = useState('');
 
   // Fetch product details
   useEffect(() => {
@@ -108,6 +107,10 @@ export default function ContactPage({ params }: ContactPageProps) {
       } else {
         console.log("Creating new chat...");
         
+        // გენერირება ტრანზაქციის ID-ის
+        const transactionId = Math.floor(1000000 + Math.random() * 9000000);
+        const paymentMethod = "stripe"; // ნაგულისხმევად Stripe
+        
         const chatData = {
           productId: product.id,
           productName: product.displayName,
@@ -123,7 +126,7 @@ export default function ContactPage({ params }: ContactPageProps) {
           },
           productPrice: product.price,
           lastMessage: {
-            text: message,
+            text: `Transaction status: Payment required for ${product.displayName}`,
             senderId: user.id,
             timestamp: Date.now()
           },
@@ -134,7 +137,9 @@ export default function ContactPage({ params }: ContactPageProps) {
             [user.id]: 0 // Read for buyer
           },
           isActive: true,
-          adminJoined: false
+          adminJoined: false,
+          transactionId: transactionId,
+          transactionStatus: "pending_payment"
         };
         
         // Create the chat document
@@ -142,12 +147,32 @@ export default function ContactPage({ params }: ContactPageProps) {
         chatId = chatRef.id;
         console.log("New chat created with ID:", chatId);
         
-        // Add first message to Firestore subcollection
+        // Add transaction status message to Firestore subcollection
         const messageData = {
-          text: message,
+          text: `
+Transaction status:
+The terms of the transaction were confirmed. When you send your payment, the seller will be notified, and will need to transfer the account login details based on the agreed upon terms. If the seller does not respond, or breaks the rules, you can call upon the escrow agent (button below).
+
+Transaction ID: ${transactionId}
+Transaction Amount: $${product.price}
+Payment Method: Visa/MasterCard`,
           senderId: user.id,
           senderName: user.name || user.email?.split('@')[0] || "User",
           timestamp: Date.now(),
+          isSystem: true,
+          isPurchaseRequest: true,
+          isTransactionStatus: true,
+          purchaseDetails: {
+            transactionId: transactionId,
+            amount: product.price,
+            paymentMethod: "Visa/MasterCard",
+            productName: product.displayName,
+            productId: product.id,
+            needsPayment: true,
+            termsConfirmed: true,
+            escrowAgent: true,
+            showPayButton: true
+          },
           read: {
             [user.id]: true,     // Read by sender
             [product.userId]: false    // Not read by recipient
@@ -159,11 +184,18 @@ export default function ContactPage({ params }: ContactPageProps) {
         // Add message to Realtime Database
         const rtdbMessagesRef = ref(rtdb, `messages/${chatId}`);
         await push(rtdbMessagesRef, {
-          text: message,
+          text: messageData.text,
           senderId: user.id,
           senderName: user.name || user.email?.split('@')[0] || "User",
           senderPhotoURL: user.photoURL || null,
           timestamp: Date.now(),
+          isSystem: true,
+          isPurchaseRequest: true,
+          isTransactionStatus: true,
+          paymentMethod: "Visa/MasterCard",
+          transactionId: transactionId,
+          amount: product.price,
+          purchaseDetails: messageData.purchaseDetails
         });
         
         console.log("First message added to chat");
@@ -193,12 +225,6 @@ export default function ContactPage({ params }: ContactPageProps) {
       <div className="bg-red-100 text-red-700 p-6 rounded-lg">
         <h2 className="text-xl font-bold mb-2">Error</h2>
         <p>{error || "Product not found"}</p>
-        <Link 
-          href="/"
-          className="mt-4 inline-block px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
-        >
-          Back to Home
-        </Link>
       </div>
     );
   }
@@ -225,7 +251,7 @@ export default function ContactPage({ params }: ContactPageProps) {
 
   return (
     <div className="bg-white rounded-lg shadow-md p-6">
-      <h1 className="text-2xl font-bold mb-6">Contact Seller</h1>
+      <h1 className="text-2xl font-bold mb-6">Purchase Channel</h1>
       
       <div className="mb-6 p-4 bg-gray-50 rounded-lg">
         <div className="flex items-center justify-between mb-4">
@@ -247,13 +273,13 @@ export default function ContactPage({ params }: ContactPageProps) {
       </div>
       
       <div className="mb-6">
-        <h2 className="text-lg font-bold mb-4">About This Process</h2>
+        <h2 className="text-lg font-bold mb-4">About the Purchase Process</h2>
         <ul className="space-y-2 text-gray-700">
           <li className="flex items-start gap-2">
             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5 text-green-600 flex-shrink-0 mt-0.5">
               <path strokeLinecap="round" strokeLinejoin="round" d="M8.625 12a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0H8.25m4.125 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0H12m4.125 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0h-.375M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
             </svg>
-            <span>When you click "Start Chat", a new conversation with the seller will be created.</span>
+            <span>When you click "Continue to Payment", a transaction will be set up for this channel purchase.</span>
           </li>
           <li className="flex items-start gap-2">
             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5 text-green-600 flex-shrink-0 mt-0.5">
@@ -283,7 +309,7 @@ export default function ContactPage({ params }: ContactPageProps) {
           disabled={isSubmitting}
           className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors disabled:opacity-50"
         >
-          {isSubmitting ? "Sending..." : "Start Chat"}
+          {isSubmitting ? "Processing..." : "Continue to Payment"}
         </button>
       </div>
     </div>

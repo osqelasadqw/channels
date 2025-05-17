@@ -28,6 +28,7 @@ interface ProductFormData {
   supportRequirements: string;
   monetizationEnabled: boolean;
   imageUrls: string[];
+  channelLogo?: string;
 }
 
 const initialFormData: ProductFormData = {
@@ -46,7 +47,8 @@ const initialFormData: ProductFormData = {
   promotionStrategy: "",
   supportRequirements: "",
   monetizationEnabled: false,
-  imageUrls: []
+  imageUrls: [],
+  channelLogo: ""
 };
 
 export default function ProductForm() {
@@ -151,12 +153,28 @@ export default function ProductForm() {
       if (channelData.items && channelData.items.length > 0) {
         const channel = channelData.items[0];
         
+        // Get channel logo/thumbnail from the API response
+        let channelLogo = "";
+        if (channel.snippet.thumbnails) {
+          // Try to get the highest quality thumbnail available
+          if (channel.snippet.thumbnails.high) {
+            channelLogo = channel.snippet.thumbnails.high.url;
+          } else if (channel.snippet.thumbnails.medium) {
+            channelLogo = channel.snippet.thumbnails.medium.url;
+          } else if (channel.snippet.thumbnails.default) {
+            channelLogo = channel.snippet.thumbnails.default.url;
+          }
+        }
+        
+        console.log("Channel logo URL:", channelLogo);
+        
         // Fill form data
         setFormData(prev => ({
           ...prev,
           displayName: channel.snippet.title || "",
           // Process subscriber count as a number
-          subscribers: parseInt(channel.statistics.subscriberCount) || 0
+          subscribers: parseInt(channel.statistics.subscriberCount) || 0,
+          channelLogo: channelLogo // შევინახოთ არხის ლოგოს URL
         }));
         
         // Mark that the channel has been found and is valid
@@ -463,16 +481,42 @@ export default function ProductForm() {
     return normalizedLink;
   };
 
+  // მივამატოთ ლოგოს ჩვენება ფორმაში
+  const ChannelLogoPreview = () => {
+    if (!formData.channelLogo) return null;
+    
+    return (
+      <div className="mt-4">
+        <p className="text-sm text-gray-600 mb-2">არხის ლოგო:</p>
+        <div className="relative w-16 h-16 rounded-full overflow-hidden border border-gray-200">
+          <Image 
+            src={formData.channelLogo} 
+            alt="არხის ლოგო" 
+            width={64} 
+            height={64}
+            className="object-cover w-full h-full"
+          />
+        </div>
+      </div>
+    );
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
+    // დაუყოვნებლივ დავაყენოთ მდგომარეობა, რომ ანიმაცია წამიერად დაიწყოს
+    setIsSubmitting(true);
+    setError(null);
+    
     if (!user) {
-      setError("You must be logged in to post a listing");
+      setError("You must be logged in to create a listing");
+      setIsSubmitting(false);
       return;
     }
 
     if (!formData.accountLink || !isValidChannel) {
       setError("Please enter a valid channel link");
+      setIsSubmitting(false);
       return;
     }
     
@@ -480,24 +524,26 @@ export default function ProductForm() {
     const channelExists = await checkIfChannelExists(formData.accountLink);
     if (channelExists || isChannelAlreadyUploaded) {
       setError("ეს არხი უკვე ატვირთულია სისტემაში. დუბლირება აკრძალულია.");
+      setIsSubmitting(false);
       return;
     }
 
     // YouTube-სთვის აუცილებელია დამატებითი ინფორმაცია
     if (formData.platform === "YouTube" && (!formData.displayName || formData.subscribers <= 0)) {
       setError("Please fill in all required fields");
+      setIsSubmitting(false);
       return;
     }
 
     // სხვა პლატფორმებისთვის საკმარისია ფასი და სახელი
     if (formData.price <= 0 || (formData.platform !== "YouTube" && !formData.displayName)) {
       setError("Please fill in all required fields");
+      setIsSubmitting(false);
       return;
     }
 
     try {
-      setIsSubmitting(true);
-      setError(null);
+      // ანიმაცია უკვე დაწყებულია, აქ აღარ არის საჭირო setIsSubmitting(true);
 
       // Upload images if selected
       let imageUrls = [...formData.imageUrls];
@@ -548,7 +594,8 @@ $${formData.expenses} — expense (month)`;
         supportRequirements: formData.supportRequirements,
         monetizationEnabled: formData.monetizationEnabled,
         imageUrls: imageUrls,
-        verificationCode: uuidv4().substring(0, 8)
+        verificationCode: uuidv4().substring(0, 8),
+        channelLogo: formData.channelLogo || ""
       };
 
       const docRef = await addDoc(collection(db, "products"), productData);
@@ -960,13 +1007,28 @@ $${formData.expenses} — expense (month)`;
           </div>
         </div>
 
+        <div className="mt-6 border-t border-gray-200 pt-6">
+          <h3 className="text-lg font-medium mb-2">Channel Logo</h3>
+          <ChannelLogoPreview />
+        </div>
+
         <div className="flex justify-center pt-4">
           <button
             type="submit"
             disabled={isSubmitting || isUploading}
-            className="px-6 py-2 bg-blue-600 text-white font-medium rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-400 focus:ring-offset-2 disabled:opacity-50 transition-colors"
+            className="px-6 py-2 bg-blue-600 text-white font-medium rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-400 focus:ring-offset-2 disabled:opacity-50 transition-colors flex items-center justify-center min-w-[180px]"
           >
-            {isSubmitting || isUploading ? "Processing..." : "Create Listing"}
+            {isSubmitting || isUploading ? (
+              <>
+                <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+                დამუშავება...
+              </>
+            ) : (
+              "Create Listing"
+            )}
           </button>
         </div>
       </form>

@@ -166,26 +166,38 @@ export default function ProductPage({ params }: ProductPageProps) {
           if (!messagesSnapshot.exists()) {
             console.log("No messages found in existing chat. Adding initial purchase message.");
             
-            // გავაგზავნოთ საწყისი შეტყობინება, თუ ჩატი ცარიელია
+            // გავაგზავნოთ საწყისი შეტყობინება, თუ ჩატი ცარიელია - გადახდის სტატუსით
             const transactionId = Math.floor(1000000 + Math.random() * 9000000);
             const paymentMethod = "stripe";
-            const useEscrow = true;
             
             await push(rtdbMessagesRef, {
-              text: `Transfer to: ${product.userEmail || "seller@example.com"}`,
-              senderId: "ADMIN_ID", // ადმინისტრატორის ID - ჩავანაცვლოთ რეალური ID-ით პროდაქშენზე
-              senderName: "Escrow Agent",
-              senderPhotoURL: null,
+              text: `
+Transaction status:
+The terms of the transaction were confirmed. When you send your payment, the seller will be notified, and will need to transfer the account login details based on the agreed upon terms. If the seller does not respond, or breaks the rules, you can call upon the escrow agent (button below).
+
+Transaction ID: ${transactionId}
+Transaction Amount: $${product.price}
+Payment Method: Visa/MasterCard`,
+              senderId: user.id,
+              senderName: user.name || user.email?.split('@')[0] || "User",
+              senderPhotoURL: user.photoURL || null,
               timestamp: Date.now(),
-              isAdmin: true,
-              isRequest: true,
-              transactionData: {
-                productId: product.id,
+              isSystem: true,
+              isPurchaseRequest: true,
+              isTransactionStatus: true,
+              paymentMethod: "Visa/MasterCard",
+              transactionId: transactionId,
+              amount: product.price,
+              purchaseDetails: {
+                transactionId: transactionId,
+                amount: product.price,
+                paymentMethod: "Visa/MasterCard",
                 productName: product.displayName,
-                price: product.price,
-                useEscrow: true,
-                paymentMethod: "bitcoin", // ან stripe, პროექტის მოთხოვნების მიხედვით
-                transactionId: transactionId
+                productId: product.id,
+                needsPayment: true,
+                termsConfirmed: true,
+                escrowAgent: true,
+                showPayButton: true
               }
             });
             
@@ -195,11 +207,11 @@ export default function ProductPage({ params }: ProductPageProps) {
             const chatDocRef = doc(db, "chats", chatId);
             await updateDoc(chatDocRef, {
               lastMessage: {
-                text: `Escrow service request for "${product.displayName}"`,
-                senderId: "ADMIN_ID", // ადმინისტრატორის ID
+                text: `Transaction status: Payment required for ${product.displayName}`,
+                senderId: user.id,
                 timestamp: Date.now()
               },
-              adminJoined: true // ჩავთვალოთ რომ ადმინი შემოვიდა ჩატში
+              adminJoined: false // ადმინი მხოლოდ გადახდის შემდეგ შემოვა ჩატში
             });
           } else {
             console.log("Existing chat already has messages, not adding initial message");
@@ -226,7 +238,7 @@ export default function ProductPage({ params }: ProductPageProps) {
         const chatData = {
           productId: product.id,
           productName: product.displayName,
-          productImage: product.imageUrls && product.imageUrls.length > 0 ? product.imageUrls[0] : "",
+          productImage: product.channelLogo || (product.imageUrls && product.imageUrls.length > 0 ? product.imageUrls[0] : ""),
           participants: [buyerId, sellerId],
           participantNames: {
             [buyerId]: user.name || user.email?.split('@')[0] || "User",
@@ -237,7 +249,7 @@ export default function ProductPage({ params }: ProductPageProps) {
             [sellerId]: "" // Assuming no photo available
           },
           productPrice: product.price,
-          lastMessage: `🔒 Request to Purchase ${product.displayName}`,
+          lastMessage: `Transaction status: Payment required for ${product.displayName}`,
           lastMessageTimestamp: Date.now(),
           createdAt: Date.now(),
           updatedAt: Date.now(),
@@ -266,23 +278,17 @@ export default function ProductPage({ params }: ProductPageProps) {
           const paymentMethod = "stripe"; // ნაგულისხმევად Stripe
           const useEscrow = true;        // ნაგულისხმევად ჩართულია escrow მომსახურება
           
-          // Create the purchase message object
+          // Create the purchase message object with transaction status styled like in the image
           const purchaseMessage = {
             senderId: buyerId,
             senderName: user.name || user.email?.split('@')[0] || "User",
-            text: `🔒 Request to Purchase ${product.displayName}
+            text: `
+Transaction status:
+The terms of the transaction were confirmed. When you send your payment, the seller will be notified, and will need to transfer the account login details based on the agreed upon terms. If the seller does not respond, or breaks the rules, you can call upon the escrow agent (button below).
+
 Transaction ID: ${transactionId}
 Transaction Amount: $${product.price}
-Payment Method: ${paymentMethod === 'stripe' ? 'Stripe' : 'Bitcoin'}
-${useEscrow ? `The buyer pays the cost of the channel + 8% ($3 minimum) service fee.
-
-The seller confirms and agrees to use the escrow service.
-
-The escrow agent verifies everything and assigns manager rights to the buyer.
-
-After 7 days (or sooner if agreed), the escrow agent removes other managers and transfers full ownership to the buyer.
-
-The funds are then released to the seller. Payments are sent instantly via all major payment methods.` : 'Direct purchase without escrow service'}`,
+Payment Method: ${paymentMethod === 'stripe' ? 'Visa/MasterCard' : 'Bitcoin'}`,
             timestamp: Date.now(),
             isSystemMessage: true,
             isPurchaseRequest: true,
@@ -293,16 +299,13 @@ The funds are then released to the seller. Payments are sent instantly via all m
             purchaseDetails: {
               transactionId: transactionId,
               amount: product.price,
-              paymentMethod: paymentMethod === 'stripe' ? 'Stripe' : 'Bitcoin',
-              escrowDetails: [
-                "The buyer pays the cost of the channel + 8% ($3 minimum) service fee.",
-                "The seller confirms and agrees to use the escrow service.",
-                "The escrow agent verifies everything and assigns manager rights to the buyer.",
-                "After 7 days (or sooner if agreed), the escrow agent removes other managers and transfers full ownership to the buyer.",
-                "The funds are then released to the seller. Payments are sent instantly via all major payment methods."
-              ],
+              paymentMethod: paymentMethod === 'stripe' ? 'Visa/MasterCard' : 'Bitcoin',
               productName: product.displayName,
-              productId: product.id
+              productId: product.id,
+              needsPayment: true,
+              termsConfirmed: true,
+              escrowAgent: true,
+              showPayButton: true
             }
           };
           
@@ -321,7 +324,11 @@ The funds are then released to the seller. Payments are sent instantly via all m
               senderName: user.name || user.email?.split('@')[0] || "User",
               timestamp: Date.now(),
               isSystem: true,
-              isPurchaseRequest: true
+              isPurchaseRequest: true,
+              isTransactionStatus: true,
+              paymentMethod: paymentMethod === 'stripe' ? 'Visa/MasterCard' : 'Bitcoin',
+              transactionId: transactionId,
+              amount: product.price
             });
             console.log("Message added to Realtime Database");
           } catch (rtdbError) {
@@ -339,7 +346,7 @@ The funds are then released to the seller. Payments are sent instantly via all m
               productImage: product.imageUrls && product.imageUrls.length > 0 ? product.imageUrls[0] : "",
               otherUserId: sellerId,
               otherUserName: product.userEmail?.split('@')[0] || "Seller",
-              lastMessage: `🔒 Request to Purchase ${product.displayName}`,
+              lastMessage: `Transaction status: Payment required for ${product.displayName}`,
               lastMessageTimestamp: Date.now(),
               unreadCount: 0,
               updatedAt: Date.now()
@@ -363,7 +370,7 @@ The funds are then released to the seller. Payments are sent instantly via all m
               productImage: product.imageUrls && product.imageUrls.length > 0 ? product.imageUrls[0] : "",
               otherUserId: buyerId,
               otherUserName: user.name || user.email?.split('@')[0] || "User",
-              lastMessage: `🔒 Request to Purchase ${product.displayName}`,
+              lastMessage: `Transaction status: Payment required for ${product.displayName}`,
               lastMessageTimestamp: Date.now(),
               unreadCount: 1,
               updatedAt: Date.now()
@@ -397,7 +404,7 @@ The funds are then released to the seller. Payments are sent instantly via all m
             productImage: product.imageUrls && product.imageUrls.length > 0 ? product.imageUrls[0] : "",
             otherUserId: product.userId,
             otherUserName: product.userEmail?.split('@')[0] || "Seller",
-            lastMessage: `🔒 Request to Purchase ${product.displayName}`,
+            lastMessage: `Transaction status: Payment required for ${product.displayName}`,
             lastMessageTimestamp: Date.now(),
             unreadCount: 0,
             updatedAt: Date.now()
@@ -477,12 +484,6 @@ The funds are then released to the seller. Payments are sent instantly via all m
           <div className="max-w-4xl w-full bg-red-50 text-red-700 p-8 rounded-lg shadow-md">
         <h2 className="text-2xl font-bold mb-4">Error</h2>
         <p className="text-lg mb-6">{error || "Product not found"}</p>
-        <Link 
-          href="/"
-          className="inline-block px-6 py-3 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors font-medium"
-        >
-          Back to Home
-        </Link>
           </div>
         </div>
         
@@ -517,12 +518,6 @@ The funds are then released to the seller. Payments are sent instantly via all m
             <span>|</span>
             <span>Updated: {product.createdAt ? new Date(product.createdAt).toLocaleDateString() : 'Recently'}</span>
             <span>|</span>
-            <Link href="/" className="text-blue-500 hover:text-blue-700 flex items-center">
-              <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
-              </svg>
-              Back to Home
-            </Link>
           </div>
           
           {user && user.id === product.userId && (
@@ -545,7 +540,16 @@ The funds are then released to the seller. Payments are sent instantly via all m
             {/* Left column - Logo (1/4) */}
             <div className="lg:w-1/4">
               <div className="rounded-full overflow-hidden w-64 h-64 mx-auto mb-8 border-4 border-gray-200">
-                {product.imageUrls && product.imageUrls.length > 0 ? (
+                {/* არხის ლოგოს ჩვენება, თუ არსებობს, წინააღმდეგ შემთხვევაში ჩვეულებრივი სურათი */}
+                {product.channelLogo ? (
+                  <Image 
+                    src={product.channelLogo} 
+                    alt={`${product.displayName} logo`}
+                    width={256}
+                    height={256}
+                    className="w-full h-full object-cover"
+                  />
+                ) : product.imageUrls && product.imageUrls.length > 0 ? (
                   <Image 
                     src={product.imageUrls[0]} 
                     alt={product.displayName}
@@ -569,7 +573,7 @@ The funds are then released to the seller. Payments are sent instantly via all m
                   disabled={contactLoading || !product}
                   className="flex-1 py-2 px-3 bg-black text-white font-medium rounded-full text-sm hover:bg-gray-800 transition-colors"
                 >
-                  {contactLoading ? 'Processing...' : 'Buy this channel'}
+                  {contactLoading ? 'Processing...' : 'Purchase Channel'}
                 </button>
                 <button 
                   onClick={handleToggleFavorite}

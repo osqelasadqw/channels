@@ -1,8 +1,54 @@
-import { doc, getDoc, setDoc, updateDoc } from 'firebase/firestore';
+import { doc, getDoc, setDoc, updateDoc, collection, query, where, getDocs } from 'firebase/firestore';
 import { db } from './config';
+
+// წინასწარ განსაზღვრული ადმინისტრატორების ელფოსტების სია
+export const ADMIN_EMAILS: string[] = [
+  "admin@example.com",
+  "superadmin@example.com",
+  "support@mateswap.com",
+  "osqel@outlook.com",     // დაამატეთ თქვენი რეალური ადმინის მეილები
+  "osqel@gmail.com",       // დაამატეთ თქვენი რეალური ადმინის მეილები
+  // დაამატეთ აქ თქვენი ადმინისტრატორების ელფოსტები
+];
+
+// ფუნქცია, რომელიც საშუალებას გვაძლევს პროგრამულად დავამატოთ ახალი ადმინის მეილი
+export const addAdminEmail = (email: string): boolean => {
+  if (!email) return false;
+  
+  const normalizedEmail = email.toLowerCase().trim();
+  if (ADMIN_EMAILS.includes(normalizedEmail)) {
+    console.log(`Email ${email} is already in admin list`);
+    return false;
+  }
+  
+  ADMIN_EMAILS.push(normalizedEmail);
+  console.log(`Added ${email} to admin list, now contains ${ADMIN_EMAILS.length} emails`);
+  return true;
+};
+
+// ფუნქცია ელფოსტის ადმინის სიიდან წასაშლელად
+export const removeAdminEmail = (email: string): boolean => {
+  if (!email) return false;
+  
+  const normalizedEmail = email.toLowerCase().trim();
+  const initialLength = ADMIN_EMAILS.length;
+  
+  const index = ADMIN_EMAILS.indexOf(normalizedEmail);
+  if (index > -1) {
+    ADMIN_EMAILS.splice(index, 1);
+    console.log(`Removed ${email} from admin list`);
+    return true;
+  }
+  
+  console.log(`Email ${email} not found in admin list`);
+  return false;
+};
 
 // მომხმარებლის როლების ტიპი
 export type UserRole = 'user' | 'admin';
+
+// ავთენტიფიკაციის პროვაიდერის ტიპები
+export type AuthProvider = 'google' | 'vercel' | 'github' | 'unknown' | string;
 
 // მომხმარებლის დოკუმენტის ტიპი Firestore-ში
 export interface UserDocument {
@@ -16,6 +62,7 @@ export interface UserDocument {
   };
   createdAt: any; // Firestore Timestamp
   lastLogin: any; // Firestore Timestamp
+  authProvider?: AuthProvider; // ავთენტიფიკაციის მომწოდებელი (google, vercel, და ა.შ.)
 }
 
 // შექმნის ან განაახლებს მომხმარებლის დოკუმენტს Firestore-ში
@@ -62,6 +109,21 @@ export const isUserAdmin = async (userId: string): Promise<boolean> => {
     
     if (userDoc.exists()) {
       const userData = userDoc.data() as UserDocument;
+      
+      // შევამოწმოთ არის თუ არა ელფოსტა წინასწარ განსაზღვრულ ადმინისტრატორების სიაში
+      if (userData.email && ADMIN_EMAILS.includes(userData.email.toLowerCase())) {
+        console.log(`User ${userId} with email ${userData.email} is in predefined admin list`);
+        
+        // განვაახლოთ მომხმარებლის დოკუმენტიც ამ ინფორმაციით
+        await updateDoc(userRef, {
+          'admin': true,
+          'isAdmin': true,
+          'roles': { admin: true }
+        });
+        
+        return true;
+      }
+      
       // შევამოწმოთ როგორც პირდაპირ დოკუმენტის დონეზე, ასევე roles ობიექტის შიგნით
       const isAdmin = userData.admin === true || userData.isAdmin === true || userData.roles?.admin === true;
       console.log(`Admin status for user ${userId}: ${isAdmin}`);
@@ -111,5 +173,33 @@ export const removeAdminRole = async (userId: string): Promise<boolean> => {
   } catch (error) {
     console.error(`Error removing admin role from user: ${userId}`, error);
     return false;
+  }
+};
+
+// მომხმარებლის მოძებნა ელფოსტით
+export const findUserByEmail = async (email: string): Promise<{userId: string, userData: UserDocument} | null> => {
+  try {
+    if (!email) return null;
+    
+    const normalizedEmail = email.toLowerCase().trim();
+    console.log(`Searching for user with email: ${normalizedEmail}`);
+    
+    const usersRef = collection(db, "users");
+    const q = query(usersRef, where("email", "==", normalizedEmail));
+    const snapshot = await getDocs(q);
+    
+    if (snapshot.empty) {
+      console.log(`No user found with email: ${normalizedEmail}`);
+      return null;
+    }
+    
+    const userId = snapshot.docs[0].id;
+    const userData = snapshot.docs[0].data() as UserDocument;
+    console.log(`Found user with ID: ${userId} for email: ${normalizedEmail}`);
+    
+    return { userId, userData };
+  } catch (error) {
+    console.error(`Error finding user by email: ${email}`, error);
+    return null;
   }
 }; 

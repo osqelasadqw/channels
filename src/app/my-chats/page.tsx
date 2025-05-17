@@ -21,6 +21,64 @@ function MyChatsContent() {
   const [selectedChatId, setSelectedChatId] = useState<string | null>(null);
   const [productId, setProductId] = useState<string>("");
 
+  // დავამატოთ კოდი, რომელიც ამუშავებს Stripe-დან დაბრუნების შემთხვევას
+  useEffect(() => {
+    const paymentStatus = searchParams.get('payment');
+    if (paymentStatus) {
+      // ვმუშაობთ გადახდის შედეგების დამუშავებაზე
+      console.log(`Payment status detected: ${paymentStatus}`);
+      
+      if (paymentStatus === 'success') {
+        // წარმატებული გადახდის შეტყობინება
+        const toastElement = document.createElement('div');
+        toastElement.className = 'fixed top-4 right-4 bg-green-500 text-white px-4 py-2 rounded-md shadow-lg z-50 flex items-center';
+        toastElement.innerHTML = `
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5 mr-2">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+          </svg>
+          Payment successful! The escrow service has been notified.
+        `;
+        document.body.appendChild(toastElement);
+        
+        // 3 წამში გავაქროთ შეტყობინება
+        setTimeout(() => {
+          toastElement.remove();
+        }, 5000);
+        
+        // გადავამისამართოთ მომხმარებელი გვერდზე პარამეტრების გარეშე
+        // იმისათვის, რომ შეტყობინება დუბლირებულად არ გამოჩნდეს
+        if (chatIdFromUrl) {
+          router.replace(`/my-chats?chatId=${chatIdFromUrl}`);
+        } else {
+          router.replace('/my-chats');
+        }
+      } else if (paymentStatus === 'cancelled') {
+        // გაუქმებული გადახდის შეტყობინება
+        const toastElement = document.createElement('div');
+        toastElement.className = 'fixed top-4 right-4 bg-yellow-500 text-white px-4 py-2 rounded-md shadow-lg z-50 flex items-center';
+        toastElement.innerHTML = `
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5 mr-2">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126z" />
+          </svg>
+          Payment cancelled. You can try again later.
+        `;
+        document.body.appendChild(toastElement);
+        
+        // 3 წამში გავაქროთ შეტყობინება
+        setTimeout(() => {
+          toastElement.remove();
+        }, 5000);
+        
+        // გადავამისამართოთ მომხმარებელი გვერდზე პარამეტრების გარეშე
+        if (chatIdFromUrl) {
+          router.replace(`/my-chats?chatId=${chatIdFromUrl}`);
+        } else {
+          router.replace('/my-chats');
+        }
+      }
+    }
+  }, [searchParams, router]);
+  
   // Redirect to login if not authenticated
   useEffect(() => {
     if (!loading && !user) {

@@ -79,7 +79,25 @@ export default function ProductCard({ product, onContactSeller, className = "" }
   return (
     <div className={`bg-white rounded-lg shadow-md overflow-hidden transition-transform hover:shadow-lg ${className}`}>
       <div className="relative aspect-[4/3]">
-        {product.imageUrls && product.imageUrls.length > 0 ? (
+        {product.channelLogo ? (
+          <Link href={`/products/${product.id}`} className="group block relative w-full h-full">
+            <Image
+              src={product.channelLogo}
+              alt={product.displayName}
+              fill
+              className="object-cover transition-all group-hover:filter group-hover:blur-[1px] group-hover:brightness-75"
+              priority={true}
+              sizes="(max-width: 768px) 100vw, (max-width: 1200px) 50vw, 25vw"
+            />
+            
+            {/* ტექსტი, რომელიც გამოჩნდება hover-ზე */}
+            <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+              <span className="bg-black bg-opacity-50 text-white px-4 py-2 rounded-md font-medium">
+                View Details
+              </span>
+            </div>
+          </Link>
+        ) : product.imageUrls && product.imageUrls.length > 0 ? (
           <>
             <Link href={`/products/${product.id}`} className="group block relative w-full h-full">
               <Image
