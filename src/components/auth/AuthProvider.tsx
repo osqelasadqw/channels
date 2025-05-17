@@ -11,7 +11,8 @@ import {
 import { auth } from "@/firebase/config";
 import { User } from "@/types/user";
 import { isUserAdmin, createOrUpdateUser } from "@/firebase/userRoles";
-import { serverTimestamp } from "firebase/firestore";
+import { serverTimestamp, doc, getDoc, setDoc } from "firebase/firestore";
+import { db } from "@/firebase/config";
 
 interface AuthContextType {
   user: User | null;
@@ -41,23 +42,45 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       setLoading(true);
       if (firebaseUser) {
         try {
-          console.log("Firebase user data:", firebaseUser);
+          console.log("Firebase user authenticated:", firebaseUser);
           
-          // სრული მომხმარებლის ინფორმაცია შევინახოთ, მიუხედავად პროვაიდერისა (Google თუ Vercel)
-          // ეს გადაწყვეტს Vercel-ით რეგისტრირებული მომხმარებლების პრობლემას
-          await createOrUpdateUser(firebaseUser.uid, {
-            email: firebaseUser.email || "",
-            name: firebaseUser.displayName || "",
-            photoURL: firebaseUser.photoURL || undefined,
-            admin: false,
-            roles: { admin: false },
-            lastLogin: serverTimestamp(),
-            // თუ არ არსებობს, დავამატოთ createdAt
-            ...(firebaseUser.metadata?.creationTime ? {} : { createdAt: serverTimestamp() }),
-          });
+          // ვამოწმებთ არსებობს თუ არა მომხმარებელი Firestore-ში
+          const userRef = doc(db, 'users', firebaseUser.uid);
+          const userDoc = await getDoc(userRef);
+          
+          if (!userDoc.exists()) {
+            console.log("User does not exist in Firestore, creating a new document");
+            
+            // შევქმნათ ახალი დოკუმენტი ყველა საჭირო მონაცემით
+            await setDoc(userRef, {
+              email: firebaseUser.email || "",
+              name: firebaseUser.displayName || "",
+              photoURL: firebaseUser.photoURL || null,
+              admin: false,
+              isAdmin: false,
+              roles: { admin: false },
+              createdAt: serverTimestamp(),
+              lastLogin: serverTimestamp(),
+            });
+            
+            console.log("New user document created successfully");
+          } else {
+            console.log("User exists in Firestore, updating lastLogin");
+            
+            // განვაახლოთ ბოლო შესვლის დრო და სხვა ცარიელი ველები
+            await createOrUpdateUser(firebaseUser.uid, {
+              lastLogin: serverTimestamp(),
+              // თუ ეს ველები არ არსებობს, დავამატოთ
+              ...(!userDoc.data()?.email ? { email: firebaseUser.email || "" } : {}),
+              ...(!userDoc.data()?.name ? { name: firebaseUser.displayName || "" } : {}),
+              ...(!userDoc.data()?.photoURL ? { photoURL: firebaseUser.photoURL || undefined } : {}),
+              ...(!userDoc.data()?.roles ? { roles: { admin: false } } : {})
+            });
+          }
           
           // Firestore-ში შევამოწმებთ არის თუ არა მომხმარებელი ადმინისტრატორი
           const isAdmin = await isUserAdmin(firebaseUser.uid);
+          console.log("User admin status:", isAdmin);
           
           // დავაყენოთ მომხმარებლის ობიექტი
           setUser({
@@ -68,7 +91,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
             isAdmin
           });
         } catch (error) {
-          console.error("Error checking admin status:", error);
+          console.error("Error in auth state change handler:", error);
           setUser({
             id: firebaseUser.uid,
             email: firebaseUser.email || "",

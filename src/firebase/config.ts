@@ -24,4 +24,12 @@ const db = getFirestore(app);
 const storage = getStorage(app);
 const rtdb = getDatabase(app);
 
+// ლოგირება დებაგისთვის
+if (typeof window !== 'undefined') {
+  console.log("Firebase initialized with project:", firebaseConfig.projectId);
+  console.log("Authentication service initialized");
+  console.log("Firestore database initialized");
+  console.log("Realtime database initialized");
+}
+
 export { app, auth, db, storage, rtdb }; 
