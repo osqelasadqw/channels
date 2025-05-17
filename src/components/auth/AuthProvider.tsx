@@ -41,13 +41,23 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       setLoading(true);
       if (firebaseUser) {
         try {
+          console.log("Firebase user data:", firebaseUser);
+          
+          // სრული მომხმარებლის ინფორმაცია შევინახოთ, მიუხედავად პროვაიდერისა (Google თუ Vercel)
+          // ეს გადაწყვეტს Vercel-ით რეგისტრირებული მომხმარებლების პრობლემას
+          await createOrUpdateUser(firebaseUser.uid, {
+            email: firebaseUser.email || "",
+            name: firebaseUser.displayName || "",
+            photoURL: firebaseUser.photoURL || undefined,
+            admin: false,
+            roles: { admin: false },
+            lastLogin: serverTimestamp(),
+            // თუ არ არსებობს, დავამატოთ createdAt
+            ...(firebaseUser.metadata?.creationTime ? {} : { createdAt: serverTimestamp() }),
+          });
+          
           // Firestore-ში შევამოწმებთ არის თუ არა მომხმარებელი ადმინისტრატორი
           const isAdmin = await isUserAdmin(firebaseUser.uid);
-          
-          // განვაახლოთ მომხმარებლის დოკუმენტი Firestore-ში - მხოლოდ lastLogin განახლდება
-          await createOrUpdateUser(firebaseUser.uid, {
-            lastLogin: serverTimestamp(),
-          });
           
           // დავაყენოთ მომხმარებლის ობიექტი
           setUser({

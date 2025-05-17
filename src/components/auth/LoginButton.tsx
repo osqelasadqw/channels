@@ -13,14 +13,13 @@ export default function LoginButton() {
   const handleSignIn = async () => {
     try {
       setIsSigningIn(true);
-      const success = await signInWithGoogle();
-      if (success) {
-        // თუ ეს login გვერდია, გადავამისამართოთ მთავარ გვერდზე
-        if (pathname === '/login') {
-          router.push("/");
-        }
-        // წინააღმდეგ შემთხვევაში, დავრჩეთ იგივე გვერდზე, რადგან ავტორიზაცია მოხდა
+      await signInWithGoogle();
+      
+      // თუ ეს login გვერდია, გადავამისამართოთ მთავარ გვერდზე
+      if (pathname === '/login') {
+        router.push("/");
       }
+      // წინააღმდეგ შემთხვევაში, დავრჩეთ იგივე გვერდზე, რადგან ავტორიზაცია მოხდა
     } catch (error) {
       console.error("Sign in failed:", error);
     } finally {
