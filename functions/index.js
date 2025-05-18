@@ -5,9 +5,9 @@ admin.initializeApp();                           // ✅ ინიციალი
 require("dotenv").config();                      // ✅ ეს სწორად გაქვს
 const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY); // ✅
 const cors = require('cors')({ 
-  origin: ['http://localhost:3000', 'https://channel-market.vercel.app'],
+  origin: ['http://localhost:3000', 'https://channel-market.vercel.app', 'https://chanels-phi.vercel.app'],
   credentials: true
-});  // CORS მხარდაჭერა ლოკალჰოსტისთვის
+});  // CORS მხარდაჭერა დომენებისთვის
 
 // დავამატოთ ფუნქცია, რომელიც დაგვიბრუნებს ბაზის URL-ს
 const getBaseUrl = () => {
@@ -62,7 +62,11 @@ const sendPrePaymentMessage = async (chatId) => {
 
 exports.createPaymentSession = functions.https.onCall(async (data, context) => {
   // onCall ფუნქციები ავტომატურად მხარს უჭერენ CORS-ს
+  // შევამოწმოთ აუთენტიფიკაცია, მაგრამ ვუზრუნველვყოთ მეტი დეტალები დებაგისთვის
+  console.log("Auth context:", context.auth);
+  
   if (!context.auth) {
+    console.error("Authentication failed: No auth context provided");
     throw new functions.https.HttpsError("unauthenticated", "User must be authenticated.");
   }
 
@@ -142,16 +146,47 @@ exports.createPaymentSession = functions.https.onCall(async (data, context) => {
 
 // დამატებით ვქმნით HTTP ვერსიას იმავე ფუნქციის, რომელიც მკაფიოდ მართავს CORS-ს
 exports.createPaymentSessionHttp = functions.https.onRequest((req, res) => {
+  // დავამატოთ CORS პრეფლაიტ მოთხოვნის მხარდაჭერა
+  res.set('Access-Control-Allow-Origin', '*');
+  
+  if (req.method === 'OPTIONS') {
+    // გავუშვათ პრეფლაიტ მოთხოვნები
+    res.set('Access-Control-Allow-Methods', 'GET, POST');
+    res.set('Access-Control-Allow-Headers', 'Content-Type, Authorization, Origin');
+    res.set('Access-Control-Max-Age', '3600');
+    res.status(204).send('');
+    return;
+  }
+  
   cors(req, res, async () => {
     try {
+      console.log("HTTP request headers:", req.headers);
+      
       // აუთენტიფიკაციის შემოწმება
       if (!req.headers.authorization || !req.headers.authorization.startsWith('Bearer ')) {
-        res.status(403).send({ error: 'Unauthorized' });
+        console.error("Authentication failed: No valid authorization header");
+        console.log("Headers received:", JSON.stringify(req.headers));
+        res.status(403).send({ error: 'Unauthorized - No valid authorization header' });
+        return;
+      }
+
+      // ტოკენის გადამოწმება
+      try {
+        const idToken = req.headers.authorization.split('Bearer ')[1];
+        const decodedToken = await admin.auth().verifyIdToken(idToken);
+        if (!decodedToken) {
+          console.error("Token verification failed");
+          res.status(403).send({ error: 'Unauthorized - Invalid token' });
+          return;
+        }
+        console.log("Token verified successfully for user:", decodedToken.uid);
+      } catch (tokenError) {
+        console.error("Token verification error:", tokenError);
+        res.status(403).send({ error: `Unauthorized - ${tokenError.message}` });
         return;
       }
 
       // ლოგი HTTP მოთხოვნის შესახებ
-      console.log(`HTTP request headers:`, req.headers);
       console.log(`HTTP request origin:`, req.headers.origin || req.headers.referer || 'Unknown');
       
       // დავამატოთ ახალი URL-ის განსაზღვრის ლოგიკა
