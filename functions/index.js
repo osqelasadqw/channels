@@ -5,9 +5,9 @@ admin.initializeApp();                           // ✅ ინიციალი
 require("dotenv").config();                      // ✅ ეს სწორად გაქვს
 const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY); // ✅
 const cors = require('cors')({ 
-  origin: ['http://localhost:3000', 'https://channel-market.vercel.app', 'https://chanels-phi.vercel.app'],
+  origin: ['http://localhost:3000', 'https://channel-market.vercel.app'],
   credentials: true
-});  // CORS მხარდაჭერა დომენებისთვის
+});  // CORS მხარდაჭერა ლოკალჰოსტისთვის
 
 // დავამატოთ ფუნქცია, რომელიც დაგვიბრუნებს ბაზის URL-ს
 const getBaseUrl = () => {
@@ -40,33 +40,72 @@ const getBaseUrl = () => {
   return 'https://channel-market.vercel.app';
 };
 
-// ფუნქცია, რომელიც აგზავნის შეტყობინებას გადახდამდე
-const sendPrePaymentMessage = async (chatId) => {
+// ფუნქცია პროდუქტის ფასის მისაღებად ან ფიქსირებული საკომისიოს დასადგენად
+const calculateFeeAmount = async (chatId) => {
   try {
-    const rtdbMessagesRef = admin.database().ref(`messages/${chatId}`);
-    await rtdbMessagesRef.push({
-      text: "To proceed, one of the parties must first pay the escrow transaction fee.\nThe terms of the transaction have been confirmed, but messaging and escrow support will only be enabled after payment.\nOnce the fee is paid, the seller will be required to deliver the account as agreed.",
-      senderId: "system",
-      senderName: "System",
-      timestamp: Date.now(),
-      isSystem: true,
-      isPaymentInfo: true,
-      status: "pre-payment"
+    const chatRef = admin.firestore().collection("chats").doc(chatId);
+    const chatSnap = await chatRef.get();
+    
+    if (!chatSnap.exists) {
+      console.log(`Chat ${chatId} not found`);
+      return null;
+    }
+    
+    const chatData = chatSnap.data();
+    
+    // მივიღოთ სავარაუდო საკომისიო
+    if (chatData.feeAmount && typeof chatData.feeAmount === "number") {
+      console.log(`Using existing feeAmount: ${chatData.feeAmount}`);
+      return chatData.feeAmount;
+    }
+    
+    // თუ პროდუქტის ID გვაქვს, მივიღოთ პროდუქტის ფასი
+    if (chatData.productId) {
+      try {
+        const productRef = admin.firestore().collection("products").doc(chatData.productId);
+        const productSnap = await productRef.get();
+        
+        if (productSnap.exists) {
+          const productData = productSnap.data();
+          if (productData.price && typeof productData.price === "number") {
+            // დავითვალოთ საკომისიო - 8% პროდუქტის ფასიდან (მინიმუმ 300 ცენტი ანუ 3 დოლარი)
+            const calculatedFee = Math.max(Math.round(productData.price * 100 * 0.08), 300);
+            console.log(`Calculated fee from product price: ${calculatedFee} cents (8% of ${productData.price})`);
+            
+            // შევინახოთ გამოთვლილი საკომისიო ჩატის დოკუმენტში მომავალი გამოყენებისთვის
+            await chatRef.update({ 
+              feeAmount: calculatedFee,
+              feeCalculatedAt: Date.now()
+            });
+            
+            return calculatedFee;
+          }
+        }
+      } catch (err) {
+        console.error(`Error getting product data for ID ${chatData.productId}:`, err);
+      }
+    }
+    
+    // თუ ვერ მოვიძიეთ ფასი, გამოვიყენოთ მინიმალური საკომისიო 3 USD
+    const defaultFee = 300; // 3 USD in cents
+    console.log(`Using default fee amount: ${defaultFee} cents`);
+    
+    // შევინახოთ ეს ფიქსირებული საკომისიო ჩატის დოკუმენტში
+    await chatRef.update({ 
+      feeAmount: defaultFee,
+      feeCalculatedAt: Date.now()
     });
-    return true;
-  } catch (error) {
-    console.error('Error sending pre-payment message:', error);
-    return false;
+    
+    return defaultFee;
+  } catch (err) {
+    console.error(`Error calculating fee for chat ${chatId}:`, err);
+    return 300; // ნებისმიერ შემთხვევაში დავაბრუნოთ მინიმალური საკომისიო
   }
 };
 
 exports.createPaymentSession = functions.https.onCall(async (data, context) => {
   // onCall ფუნქციები ავტომატურად მხარს უჭერენ CORS-ს
-  // შევამოწმოთ აუთენტიფიკაცია, მაგრამ ვუზრუნველვყოთ მეტი დეტალები დებაგისთვის
-  console.log("Auth context:", context.auth);
-  
   if (!context.auth) {
-    console.error("Authentication failed: No auth context provided");
     throw new functions.https.HttpsError("unauthenticated", "User must be authenticated.");
   }
 
@@ -88,32 +127,20 @@ exports.createPaymentSession = functions.https.onCall(async (data, context) => {
     baseUrl = getBaseUrl();
   }
   
-  const chatRef = admin.firestore().collection("chats").doc(chatId);
-  const chatSnap = await chatRef.get();
-
-  if (!chatSnap.exists) {
-    throw new functions.https.HttpsError("not-found", "Chat not found.");
+  // გამოვითვალოთ საკომისიო თანხა
+  const feeAmount = await calculateFeeAmount(chatId);
+  
+  if (!feeAmount) {
+    throw new functions.https.HttpsError("failed-precondition", "Failed to calculate fee amount.");
   }
 
-  const chatData = chatSnap.data();
-  const feeAmount = chatData.feeAmount;
-
-  if (!feeAmount || typeof feeAmount !== "number") {
-    throw new functions.https.HttpsError("invalid-argument", "Invalid or missing feeAmount.");
-  }
-
-  // შევამოწმოთ არის თუ არა გადახდამდე შეტყობინება გაგზავნილი
-  if (!chatData.prePaymentMessageSent) {
-    await sendPrePaymentMessage(chatId);
-    await chatRef.update({ prePaymentMessageSent: true });
-  }
-
-  // შევცვალოთ წარმატებული გადახდის მისამართი, რომ პირდაპირ ჩატზე გადამისამართდეს
-  const successUrl = `${baseUrl}/chats/${chatId}?payment=success`;
-  const cancelUrl = `${baseUrl}/chats/${chatId}?payment=cancelled`;
+  // წარმატებისა და გაუქმების URL-ები - უნდა დავბრუნდეთ იმავე ჩატში
+  const successUrl = `${baseUrl}/my-chats?chatId=${chatId}&payment=success`;
+  const cancelUrl = `${baseUrl}/my-chats?chatId=${chatId}&payment=cancelled`;
   
   console.log(`Using base URL: ${baseUrl}`);
   console.log(`Setting success URL to: ${successUrl}`);
+  console.log(`Fee amount: ${feeAmount} cents`);
   
   const session = await stripe.checkout.sessions.create({
     payment_method_types: ["card"],
@@ -136,6 +163,8 @@ exports.createPaymentSession = functions.https.onCall(async (data, context) => {
     },
   });
 
+  // შევინახოთ სესიის ID ჩატის დოკუმენტში
+  const chatRef = admin.firestore().collection("chats").doc(chatId);
   await chatRef.update({
     paymentSessionId: session.id,
     paymentSessionCreatedAt: Date.now(),
@@ -146,100 +175,65 @@ exports.createPaymentSession = functions.https.onCall(async (data, context) => {
 
 // დამატებით ვქმნით HTTP ვერსიას იმავე ფუნქციის, რომელიც მკაფიოდ მართავს CORS-ს
 exports.createPaymentSessionHttp = functions.https.onRequest((req, res) => {
-  // დავამატოთ CORS პრეფლაიტ მოთხოვნის მხარდაჭერა
-  res.set('Access-Control-Allow-Origin', '*');
-  
-  if (req.method === 'OPTIONS') {
-    // გავუშვათ პრეფლაიტ მოთხოვნები
-    res.set('Access-Control-Allow-Methods', 'GET, POST');
-    res.set('Access-Control-Allow-Headers', 'Content-Type, Authorization, Origin');
-    res.set('Access-Control-Max-Age', '3600');
-    res.status(204).send('');
-    return;
-  }
-  
   cors(req, res, async () => {
     try {
-      console.log("HTTP request headers:", req.headers);
-      
       // აუთენტიფიკაციის შემოწმება
       if (!req.headers.authorization || !req.headers.authorization.startsWith('Bearer ')) {
-        console.error("Authentication failed: No valid authorization header");
-        console.log("Headers received:", JSON.stringify(req.headers));
-        res.status(403).send({ error: 'Unauthorized - No valid authorization header' });
-        return;
-      }
-
-      // ტოკენის გადამოწმება
-      try {
-        const idToken = req.headers.authorization.split('Bearer ')[1];
-        const decodedToken = await admin.auth().verifyIdToken(idToken);
-        if (!decodedToken) {
-          console.error("Token verification failed");
-          res.status(403).send({ error: 'Unauthorized - Invalid token' });
-          return;
-        }
-        console.log("Token verified successfully for user:", decodedToken.uid);
-      } catch (tokenError) {
-        console.error("Token verification error:", tokenError);
-        res.status(403).send({ error: `Unauthorized - ${tokenError.message}` });
+        console.error('Unauthorized request: Missing or invalid authorization header');
+        res.status(403).send({ error: 'Unauthorized' });
         return;
       }
 
       // ლოგი HTTP მოთხოვნის შესახებ
+      console.log(`HTTP request headers:`, req.headers);
+      console.log(`HTTP request body:`, req.body);
       console.log(`HTTP request origin:`, req.headers.origin || req.headers.referer || 'Unknown');
       
       // დავამატოთ ახალი URL-ის განსაზღვრის ლოგიკა
       let baseUrl;
       
       // ვცადოთ მივიღოთ origin მოთხოვნიდან
-      if (req.headers.origin) {
+      if (req.body.origin) {
+        baseUrl = req.body.origin;
+        console.log(`Using origin from request body: ${baseUrl}`);
+      } else if (req.headers.origin) {
         baseUrl = req.headers.origin;
+        console.log(`Using origin from headers: ${baseUrl}`);
       } else if (req.headers.referer) {
         // თუ origin არ არის, ვცადოთ referer
         const url = new URL(req.headers.referer);
         baseUrl = `${url.protocol}//${url.host}`;
+        console.log(`Using referer as origin: ${baseUrl}`);
       } else {
         // თუ ვერცერთი ვერ ვიპოვეთ, გამოვიყენოთ ჩვენი ფუნქცია
         baseUrl = getBaseUrl();
+        console.log(`Using default base URL: ${baseUrl}`);
       }
-      
-      console.log(`Determined base URL from request: ${baseUrl}`);
 
       // ვალიდაცია და ლოგიკა
       const chatId = req.body.chatId;
       if (!chatId) {
+        console.error('Missing chatId in request body');
         res.status(400).send({ error: 'chatId is required' });
         return;
       }
-
-      const chatRef = admin.firestore().collection("chats").doc(chatId);
-      const chatSnap = await chatRef.get();
-
-      if (!chatSnap.exists) {
-        res.status(404).send({ error: 'Chat not found' });
+      
+      // გამოვითვალოთ საკომისიო თანხა
+      const feeAmount = await calculateFeeAmount(chatId);
+      
+      if (!feeAmount) {
+        console.error('Failed to calculate fee for chat:', chatId);
+        res.status(500).send({ error: 'Failed to calculate fee amount' });
         return;
       }
 
-      const chatData = chatSnap.data();
-      const feeAmount = chatData.feeAmount;
-
-      if (!feeAmount || typeof feeAmount !== "number") {
-        res.status(400).send({ error: 'Invalid or missing feeAmount' });
-        return;
-      }
-
-      // შევამოწმოთ არის თუ არა გადახდამდე შეტყობინება გაგზავნილი
-      if (!chatData.prePaymentMessageSent) {
-        await sendPrePaymentMessage(chatId);
-        await chatRef.update({ prePaymentMessageSent: true });
-      }
-
-      // შევცვალოთ წარმატებული გადახდის მისამართი, რომ პირდაპირ ჩატზე გადამისამართდეს
-      const successUrl = `${baseUrl}/chats/${chatId}?payment=success`;
-      const cancelUrl = `${baseUrl}/chats/${chatId}?payment=cancelled`;
+      // წარმატებისა და გაუქმების URL-ები - უნდა დავბრუნდეთ იმავე ჩატში
+      const successUrl = `${baseUrl}/my-chats?chatId=${chatId}&payment=success`;
+      const cancelUrl = `${baseUrl}/my-chats?chatId=${chatId}&payment=cancelled`;
       
       console.log(`HTTP handler using base URL: ${baseUrl}`);
+      console.log(`Setting success URL to: ${successUrl}`);
+      console.log(`Fee amount: ${feeAmount} cents`);
       
       const session = await stripe.checkout.sessions.create({
         payment_method_types: ["card"],
@@ -262,6 +256,8 @@ exports.createPaymentSessionHttp = functions.https.onRequest((req, res) => {
         },
       });
 
+      // შევინახოთ სესიის ID ჩატის დოკუმენტში
+      const chatRef = admin.firestore().collection("chats").doc(chatId);
       await chatRef.update({
         paymentSessionId: session.id,
         paymentSessionCreatedAt: Date.now(),
@@ -274,43 +270,6 @@ exports.createPaymentSessionHttp = functions.https.onRequest((req, res) => {
     }
   });
 });
-
-// დავამატოთ 7-დღიანი თაიმერის ფუნქცია, რომელიც გაეშვება გადახდის დასრულების შემდეგ
-const createEscrowTimer = async (chatId, startTimestamp) => {
-  try {
-    // დავაფიქსიროთ დასრულების დრო - 7 დღე (604800000 მილიწამი)
-    const endTimestamp = startTimestamp + 604800000;
-
-    // შევინახოთ ეს ინფორმაცია Firestore-ში
-    await admin.firestore().collection("chats").doc(chatId).update({
-      escrowTimerStarted: true,
-      escrowTimerStart: startTimestamp,
-      escrowTimerEnd: endTimestamp,
-      escrowStatus: 'active'
-    });
-
-    // გავგზავნოთ ინფორმაცია თაიმერის შესახებ ჩატში
-    const rtdbMessagesRef = admin.database().ref(`messages/${chatId}`);
-    await rtdbMessagesRef.push({
-      text: "⏱️ The 7-day escrow period has begun. The seller must complete the transfer within this timeframe.",
-      senderId: "system",
-      senderName: "System",
-      timestamp: startTimestamp,
-      isSystem: true,
-      isTimerInfo: true,
-      timerData: {
-        startTime: startTimestamp,
-        endTime: endTimestamp,
-        durationDays: 7
-      }
-    });
-
-    return true;
-  } catch (error) {
-    console.error('Error creating escrow timer:', error);
-    return false;
-  }
-};
 
 // Stripe webhook ფუნქცია გადახდის დასასრულებლად
 exports.stripeWebhook = functions.https.onRequest(async (req, res) => {
@@ -361,41 +320,45 @@ exports.stripeWebhook = functions.https.onRequest(async (req, res) => {
         }
         
         const chatData = chatSnap.data();
-        const currentTimestamp = Date.now();
         
         // ვაახლებთ ჩატის მდგომარეობას
         await chatRef.update({
           paymentCompleted: true,
-          paymentCompletedAt: currentTimestamp,
+          paymentCompletedAt: Date.now(),
           paymentStatus: 'completed',
           paymentId: session.payment_intent || session.id
         });
         
-        // დამატებით ვაგზავნით შეტყობინებას ჩატში გადახდის დასტურით
+        // დავაშლელოთ გადახდამდე და გადახდის შემდგომი შეტყობინებები
+        const beforePaymentMessage = "To proceed, one of the parties must first pay the escrow transaction fee.\n" +
+          "The terms of the transaction have been confirmed, but messaging and escrow support will only be enabled after payment.\n" +
+          "Once the fee is paid, the seller will be required to deliver the account as agreed. If needed, you'll be able to request help from the escrow agent.";
+
+        const afterPaymentMessage = "✅ Payment confirmed.\n" +
+          "The seller has been notified and is now required to provide the agreed login details.\n" +
+          "If the seller fails to deliver or violates the terms, you can request assistance from the escrow agent using the button below.";
+        
+        // გადახდის დადასტურების შეტყობინება ჩატში
         const rtdbMessagesRef = admin.database().ref(`messages/${chatId}`);
         await rtdbMessagesRef.push({
-          text: "✅ Payment confirmed.\nThe seller has been notified and is now required to provide the agreed login details.\nIf the seller fails to deliver or violates the terms, you can request assistance from the escrow agent using the button below.",
+          text: afterPaymentMessage,
           senderId: "system",
           senderName: "System",
-          timestamp: currentTimestamp,
+          timestamp: Date.now(),
           isSystem: true,
-          isPaymentInfo: true,
-          status: "payment-confirmed"
+          isPaymentConfirmation: true
         });
-        
-        // ვიწყებთ 7-დღიან თაიმერს
-        await createEscrowTimer(chatId, currentTimestamp);
         
         // ვაგზავნით ნოტიფიკაციას ადმინისტრატორისთვის
         await admin.firestore().collection('admin_notifications').add({
           type: 'payment_completed',
           chatId,
           productId: chatData.productId,
-          productName: chatData.productName,
+          productName: chatData.productName || "Unknown Product",
           buyerId: paidBy,
           paymentSessionId: session.id,
           paymentAmount: session.amount_total,
-          createdAt: currentTimestamp,
+          createdAt: Date.now(),
           read: false,
           priority: 'high',
           needsAction: true,
@@ -407,9 +370,8 @@ exports.stripeWebhook = functions.https.onRequest(async (req, res) => {
         await adminNotificationsRef.push({
           type: 'payment_completed',
           chatId,
-          productName: chatData.productName,
-          timestamp: currentTimestamp,
-          timerEndTimestamp: currentTimestamp + 604800000 // 7 დღე
+          productName: chatData.productName || "Unknown Product",
+          timestamp: Date.now()
         });
         
         console.log(`Payment for chat ${chatId} completed successfully`);

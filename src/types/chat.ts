@@ -9,6 +9,7 @@ export interface Message {
   isRequest?: boolean;
   isSystem?: boolean;
   isEscrowRequest?: boolean;
+  isPaymentConfirmation?: boolean;
   transactionData?: {
     productId: string;
     productName: string;
@@ -34,6 +35,12 @@ export interface Chat {
   isPrivateWithUser?: boolean;
   isEscrowChat?: boolean;
   originalChatId?: string;
+  paymentCompleted?: boolean;
+  paymentCompletedAt?: number;
+  paymentStatus?: string;
+  paymentId?: string;
+  paymentSessionId?: string;
+  feeAmount?: number;
 }
 
 export interface ChatState {

@@ -18,19 +18,21 @@ function MyChatsContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const chatIdFromUrl = searchParams.get('chatId');
+  const paymentStatus = searchParams.get('payment');
   const [selectedChatId, setSelectedChatId] = useState<string | null>(null);
   const [productId, setProductId] = useState<string>("");
 
   // დავამატოთ კოდი, რომელიც ამუშავებს Stripe-დან დაბრუნების შემთხვევას
   useEffect(() => {
-    const paymentStatus = searchParams.get('payment');
-    if (paymentStatus) {
+    if (paymentStatus && chatIdFromUrl) {
       // ვმუშაობთ გადახდის შედეგების დამუშავებაზე
-      console.log(`Payment status detected: ${paymentStatus}`);
+      console.log(`Payment status detected: ${paymentStatus} for chat: ${chatIdFromUrl}`);
+      
+      let toastElement: HTMLDivElement | null = null;
       
       if (paymentStatus === 'success') {
         // წარმატებული გადახდის შეტყობინება
-        const toastElement = document.createElement('div');
+        toastElement = document.createElement('div');
         toastElement.className = 'fixed top-4 right-4 bg-green-500 text-white px-4 py-2 rounded-md shadow-lg z-50 flex items-center';
         toastElement.innerHTML = `
           <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5 mr-2">
@@ -38,23 +40,9 @@ function MyChatsContent() {
           </svg>
           Payment successful! The escrow service has been notified.
         `;
-        document.body.appendChild(toastElement);
-        
-        // 3 წამში გავაქროთ შეტყობინება
-        setTimeout(() => {
-          toastElement.remove();
-        }, 5000);
-        
-        // გადავამისამართოთ მომხმარებელი გვერდზე პარამეტრების გარეშე
-        // იმისათვის, რომ შეტყობინება დუბლირებულად არ გამოჩნდეს
-        if (chatIdFromUrl) {
-          router.replace(`/my-chats?chatId=${chatIdFromUrl}`);
-        } else {
-          router.replace('/my-chats');
-        }
       } else if (paymentStatus === 'cancelled') {
         // გაუქმებული გადახდის შეტყობინება
-        const toastElement = document.createElement('div');
+        toastElement = document.createElement('div');
         toastElement.className = 'fixed top-4 right-4 bg-yellow-500 text-white px-4 py-2 rounded-md shadow-lg z-50 flex items-center';
         toastElement.innerHTML = `
           <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5 mr-2">
@@ -62,22 +50,24 @@ function MyChatsContent() {
           </svg>
           Payment cancelled. You can try again later.
         `;
+      }
+      
+      if (toastElement) {
         document.body.appendChild(toastElement);
         
-        // 3 წამში გავაქროთ შეტყობინება
+        // 5 წამში გავაქროთ შეტყობინება
         setTimeout(() => {
-          toastElement.remove();
+          if (toastElement && document.body.contains(toastElement)) {
+            document.body.removeChild(toastElement);
+          }
         }, 5000);
         
-        // გადავამისამართოთ მომხმარებელი გვერდზე პარამეტრების გარეშე
-        if (chatIdFromUrl) {
-          router.replace(`/my-chats?chatId=${chatIdFromUrl}`);
-        } else {
-          router.replace('/my-chats');
-        }
+        // გადავამისამართოთ მომხმარებელი გვერდზე პარამეტრის გარეშე ან მხოლოდ chatId-ით
+        // რადგან არ გვჭირდება payment პარამეტრი URL-ში
+        router.replace(`/my-chats?chatId=${chatIdFromUrl}`);
       }
     }
-  }, [searchParams, router]);
+  }, [paymentStatus, chatIdFromUrl, router]);
   
   // Redirect to login if not authenticated
   useEffect(() => {

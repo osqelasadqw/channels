@@ -6,7 +6,7 @@ import { useAuth } from "@/components/auth/AuthProvider";
 import { Chat, Message } from "@/types/chat";
 import { db, rtdb, functions, auth } from "@/firebase/config";
 import { ref, push, onValue, off } from "firebase/database";
-import { doc, getDoc, updateDoc } from "firebase/firestore";
+import { doc, getDoc, updateDoc, onSnapshot } from "firebase/firestore";
 import { addDoc, collection } from "firebase/firestore";
 import { httpsCallable } from "firebase/functions";
 
@@ -26,6 +26,7 @@ export default function ChatInterface({ chatId, productId }: ChatInterfaceProps)
   const [walletAddress, setWalletAddress] = useState<string>("");
   const [isSubmittingWallet, setIsSubmittingWallet] = useState<boolean>(false);
   const [isWalletSubmitted, setIsWalletSubmitted] = useState<boolean>(false);
+  const [paymentCompleted, setPaymentCompleted] = useState<boolean>(false);
 
   // Fetch chat data and messages
   useEffect(() => {
@@ -45,13 +46,18 @@ export default function ChatInterface({ chatId, productId }: ChatInterfaceProps)
         const chatDoc = await getDoc(chatDocRef);
         
         if (chatDoc.exists()) {
-          setChatData(chatDoc.data() as Chat);
+          const data = chatDoc.data() as Chat;
+          setChatData(data);
           
           // დავამატოთ ბაზიდან მიღებული ჩატის მონაცემები კონსოლში
-          console.log("Chat data from Firestore:", chatDoc.data());
+          console.log("Chat data from Firestore:", data);
+          
+          // შევამოწმოთ გადახდის სტატუსი და განვაახლოთ state
+          const isPaymentDone = !!data.paymentCompleted;
+          setPaymentCompleted(isPaymentDone);
+          console.log("Payment status:", isPaymentDone ? "Completed" : "Not completed");
           
           // შევამოწმოთ ჩატში არის თუ არა მონაცემი lastMessage
-          const data = chatDoc.data();
           if (data.lastMessage) {
             console.log("Last message found in Firestore:", data.lastMessage);
           } else {
@@ -86,6 +92,17 @@ export default function ChatInterface({ chatId, productId }: ChatInterfaceProps)
         
         console.log("Parsed messages:", messageList);
         setMessages(messageList);
+        
+        // შევამოწმოთ გადახდის დადასტურების შეტყობინება
+        const paymentConfirmationMessage = messageList.find(msg => msg.isPaymentConfirmation);
+        if (paymentConfirmationMessage) {
+          setPaymentCompleted(true);
+          console.log("Payment confirmation message found:", paymentConfirmationMessage);
+          
+          // ასევე შეიძლება ვცადოთ Firestore-ში ვეძებოთ გადახდის სტატუსი თუ რეალურ დროში არ მოგვაქვს
+          // ეს საშუალებას გვაძლევს დავინახოთ გადახდის სტატუსის ცვლილებები მყისიერად
+          fetchChatData();
+        }
       } else {
         // თუ მონაცემები არ არის, ცარიელი მასივი დავაყენოთ
         setMessages([]);
@@ -97,9 +114,29 @@ export default function ChatInterface({ chatId, productId }: ChatInterfaceProps)
       setLoading(false);
     });
 
+    // რეალურ დროში შევამოწმოთ გადახდის სტატუსი ჩატის დოკუმენტის მოთხოვნით
+    // ეს საშუალებას გვაძლევს დავინახოთ გადახდის სტატუსის ცვლილებები მყისიერად
+    const chatDocRef = doc(db, "chats", chatId);
+    const unsubscribeChatDocListener = onSnapshot(chatDocRef, (chatDocSnapshot) => {
+      if (chatDocSnapshot.exists()) {
+        const updatedChatData = chatDocSnapshot.data() as Chat;
+        console.log("Chat document updated (realtime):", updatedChatData);
+        
+        // განვაახლოთ ჩატის მონაცემები state-ში
+        setChatData(updatedChatData);
+        
+        // შევამოწმოთ გადახდის სტატუსი
+        if (updatedChatData.paymentCompleted) {
+          setPaymentCompleted(true);
+          console.log("Payment status updated to completed from realtime Firestore");
+        }
+      }
+    });
+
     return () => {
-      // Clean up listener
+      // Clean up listeners
       off(messagesRef);
+      unsubscribeChatDocListener();
     };
   }, [chatId, user]);
 
@@ -233,7 +270,12 @@ export default function ChatInterface({ chatId, productId }: ChatInterfaceProps)
       } else if (walletAddress === 'card') {
         try {
           // მივიღოთ მომხმარებლის ტოკენი
-          const token = auth.currentUser ? await auth.currentUser.getIdToken() : '';
+          const token = auth.currentUser ? await auth.currentUser.getIdToken(true) : '';
+          
+          // თუ ტოკენი არ გვაქვს, შეცდომა გამოვაქვეყნოთ
+          if (!token) {
+            throw new Error('Authentication required. Please log in again.');
+          }
 
           // მივიღოთ current window საიტის origin-ი
           const origin = window.location.origin;
@@ -250,16 +292,23 @@ export default function ChatInterface({ chatId, productId }: ChatInterfaceProps)
             body: JSON.stringify({
               chatId,
               userId: user?.id,
-              origin: origin // დავამატოთ origin პარამეტრიც
+              origin  // დავამატოთ origin პარამეტრიც
             }),
+            credentials: 'include'
           });
           
           if (!response.ok) {
-            throw new Error(`HTTP error! status: ${response.status}`);
+            const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
+            console.error('Payment API error:', errorData);
+            throw new Error(`HTTP error! status: ${response.status}, message: ${errorData.error || 'Unknown error'}`);
           }
           
           const data = await response.json();
           console.log("Payment session created successfully:", data);
+          
+          if (!data.url) {
+            throw new Error('No checkout URL returned from server');
+          }
           
           // გადავამისამართოთ Stripe Checkout გვერდზე
           window.location.href = data.url;
@@ -270,12 +319,23 @@ export default function ChatInterface({ chatId, productId }: ChatInterfaceProps)
           console.log("Falling back to httpsCallable method");
           
           try {
+            // მივიღოთ მომხმარებლის ტოკენი თავიდან, ჩავარდნის შემთხვევისთვის
+            if (auth.currentUser) {
+              await auth.currentUser.getIdToken(true);
+            }
+            
             const createSession = httpsCallable(functions, "createPaymentSession");
             const result = await createSession({ 
               chatId,
               origin: window.location.origin
             });
-            const data = result.data as { url: string };
+            
+            // შედეგის ტიპიზაცია და შემოწმება
+            const data = result.data as { url?: string };
+            
+            if (!data || !data.url) {
+              throw new Error('Invalid response from server');
+            }
             
             console.log("Payment session created successfully with fallback:", data);
             
@@ -284,7 +344,11 @@ export default function ChatInterface({ chatId, productId }: ChatInterfaceProps)
             return; // ვწყვეტთ ფუნქციას, რადგან Stripe checkout გვერდზე გადადის
           } catch (error) {
             console.error("Error initiating Stripe payment:", error);
-            alert("Failed to initiate credit card payment. Please try again.");
+            
+            // დავამატოთ შეტყობინების ჩვენება
+            const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+            alert(`Failed to initiate credit card payment: ${errorMessage}. Please try again.`);
+            
             setIsSubmittingWallet(false);
             return;
           }
@@ -292,7 +356,12 @@ export default function ChatInterface({ chatId, productId }: ChatInterfaceProps)
       }
     } catch (error) {
       console.error("Error processing payment:", error);
-      alert("Failed to process payment. Please try again later.");
+      
+      // დავამატოთ შეტყობინების ჩვენება
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      alert(`Failed to process payment: ${errorMessage}. Please try again later.`);
+      
+      setIsSubmittingWallet(false);
     } finally {
       setIsSubmittingWallet(false);
     }
@@ -359,11 +428,19 @@ export default function ChatInterface({ chatId, productId }: ChatInterfaceProps)
           
           <div className="rounded-lg border border-blue-100 bg-blue-50 p-4 mt-4">
             <div className="font-medium text-blue-800 mb-1">Transaction status:</div>
-            <p className="text-blue-700">The terms of the transaction were confirmed. When you send your payment, the seller will be notified, and will need to transfer the account login details based on the agreed upon terms. If the seller does not respond, of breaks the rules, you can call upon the escrow agent (button below).</p>
+            {paymentCompleted ? (
+              <p className="text-green-700">
+                ✅ Payment confirmed.
+                The seller has been notified and is now required to provide the agreed login details.
+                If the seller fails to deliver or violates the terms, you can request assistance from the escrow agent using the button below.
+              </p>
+            ) : (
+              <p className="text-blue-700">The terms of the transaction were confirmed. When you send your payment, the seller will be notified, and will need to transfer the account login details based on the agreed upon terms. If the seller does not respond, of breaks the rules, you can call upon the escrow agent (button below).</p>
+            )}
           </div>
           
-          {/* Input form for payment method selection - visible to both buyer and seller */}
-          {!isWalletSubmitted && (
+          {/* Input form for payment method selection - visible only if payment is not completed */}
+          {!paymentCompleted && !isWalletSubmitted && (
             <div className="mt-4 border-t border-gray-200 pt-4">
               <div className="mb-2 text-sm font-semibold text-gray-700">
                 Please select payment method:
@@ -410,8 +487,8 @@ export default function ChatInterface({ chatId, productId }: ChatInterfaceProps)
             </div>
           )}
           
-          {/* If payment method is selected */}
-          {isWalletSubmitted && (
+          {/* If payment method is selected but not completed */}
+          {!paymentCompleted && isWalletSubmitted && (
             <div className="mt-4 border-t border-gray-200 pt-4">
               <div className="flex items-center justify-between">
                 <div className="flex items-center bg-green-50 text-green-700 p-3 rounded-lg border border-green-200">
@@ -448,6 +525,18 @@ export default function ChatInterface({ chatId, productId }: ChatInterfaceProps)
                   }
                 }
               `}</style>
+            </div>
+          )}
+          
+          {/* If payment is completed show confirmation */}
+          {paymentCompleted && (
+            <div className="mt-4 border-t border-gray-200 pt-4">
+              <div className="flex items-center bg-green-50 text-green-700 p-3 rounded-lg border border-green-200">
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5 mr-2 text-green-500">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                <span className="font-medium">Payment has been confirmed! The seller has been notified.</span>
+              </div>
             </div>
           )}
         </div>
@@ -536,11 +625,19 @@ export default function ChatInterface({ chatId, productId }: ChatInterfaceProps)
           
           <div className="rounded-lg border border-blue-100 bg-blue-50 p-4 mt-4">
             <div className="font-medium text-blue-800 mb-1">Transaction status:</div>
-            <p className="text-blue-700">The terms of the transaction were confirmed. When you send your payment, the seller will be notified, and will need to transfer the account login details based on the agreed upon terms. If the seller does not respond, of breaks the rules, you can call upon the escrow agent (button below).</p>
+            {paymentCompleted ? (
+              <p className="text-green-700">
+                ✅ Payment confirmed.
+                The seller has been notified and is now required to provide the agreed login details.
+                If the seller fails to deliver or violates the terms, you can request assistance from the escrow agent using the button below.
+              </p>
+            ) : (
+              <p className="text-blue-700">The terms of the transaction were confirmed. When you send your payment, the seller will be notified, and will need to transfer the account login details based on the agreed upon terms. If the seller does not respond, of breaks the rules, you can call upon the escrow agent (button below).</p>
+            )}
           </div>
 
-          {/* Input form for the buyer's payment method selection */}
-          {!isSeller && !isWalletSubmitted && (
+          {/* Input form for the buyer's payment method selection - only show if payment not completed */}
+          {!paymentCompleted && !isSeller && !isWalletSubmitted && (
             <div className="mt-4 border-t border-gray-200 pt-4">
               <div className="mb-2 text-sm font-semibold text-gray-700">
                 Please select payment method:
@@ -587,8 +684,8 @@ export default function ChatInterface({ chatId, productId }: ChatInterfaceProps)
             </div>
           )}
           
-          {/* If payment method is selected */}
-          {isWalletSubmitted && (
+          {/* If payment method is selected but not completed */}
+          {!paymentCompleted && isWalletSubmitted && (
             <div className="mt-4 border-t border-gray-200 pt-4">
               <div className="flex items-center justify-between">
                 <div className="flex items-center bg-green-50 text-green-700 p-3 rounded-lg border border-green-200">
@@ -625,6 +722,18 @@ export default function ChatInterface({ chatId, productId }: ChatInterfaceProps)
                   }
                 }
               `}</style>
+            </div>
+          )}
+          
+          {/* If payment is completed show confirmation */}
+          {paymentCompleted && (
+            <div className="mt-4 border-t border-gray-200 pt-4">
+              <div className="flex items-center bg-green-50 text-green-700 p-3 rounded-lg border border-green-200">
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5 mr-2 text-green-500">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                <span className="font-medium">Payment has been confirmed! The seller has been notified.</span>
+              </div>
             </div>
           )}
         </div>
@@ -727,6 +836,56 @@ export default function ChatInterface({ chatId, productId }: ChatInterfaceProps)
     );
   };
 
+  // ჩატის ინტერფეისში დავამატოთ სისტემური შეტყობინების კომპონენტი
+  const PaymentStatusMessage = () => {
+    // თუ საუბარში უკვე არის გადახდის დადასტურების შეტყობინება, აღარ ვაჩენებთ დამატებით შეტყობინებას
+    const paymentConfirmationExists = messages.some(msg => msg.isPaymentConfirmation);
+    
+    // თუ ნაპოვნია გადახდის დადასტურების შეტყობინება, მაგრამ paymentCompleted ფლაგი არ არის ჩართული,
+    // ავტომატურად ვანიჭებთ მას true მნიშვნელობას, რომ UI-ს სხვა ნაწილებიც შესაბამისად განახლდეს
+    useEffect(() => {
+      if (paymentConfirmationExists && !paymentCompleted) {
+        setPaymentCompleted(true);
+        console.log("Payment confirmed based on payment confirmation message");
+      }
+    }, [paymentConfirmationExists]);
+    
+    if (!chatData?.productId) {
+      return null; // არ ვაჩვენოთ თუ ეს არ არის პროდუქტის ჩატი
+    }
+
+    // თუ უკვე არსებობს გადახდის დადასტურების შეტყობინება ჩატში, ვჩქმალავთ დამატებით შეტყობინებას
+    if (paymentConfirmationExists) {
+      return null;
+    }
+
+    const beforePaymentMessage = "To proceed, one of the parties must first pay the escrow transaction fee.\nThe terms of the transaction have been confirmed, but messaging and escrow support will only be enabled after payment.\nOnce the fee is paid, the seller will be required to deliver the account as agreed. If needed, you'll be able to request help from the escrow agent.";
+    
+    const afterPaymentMessage = "✅ Payment confirmed.\nThe seller has been notified and is now required to provide the agreed login details.\nIf the seller fails to deliver or violates the terms, you can request assistance from the escrow agent using the button below.";
+    
+    return (
+      <div className="mb-6 p-4 rounded-lg border bg-blue-50 border-blue-100">
+        <div className="flex items-center mb-2">
+          {paymentCompleted ? (
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-6 h-6 text-green-600 mr-2">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+          ) : (
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-6 h-6 text-blue-600 mr-2">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M11.25 11.25l.041-.02a.75.75 0 011.063.852l-.708 2.836a.75.75 0 001.063.853l.041-.021M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9-3.75h.008v.008H12V8.25z" />
+            </svg>
+          )}
+          <h3 className={`font-semibold ${paymentCompleted ? "text-green-800" : "text-blue-800"}`}>
+            {paymentCompleted ? "Payment Status: Confirmed" : "Payment Status: Pending"}
+          </h3>
+        </div>
+        <p className={`whitespace-pre-wrap text-sm ${paymentCompleted ? "text-green-700" : "text-blue-700"}`}>
+          {paymentCompleted ? afterPaymentMessage : beforePaymentMessage}
+        </p>
+      </div>
+    );
+  };
+
   if (!user) {
     return (
       <div className="h-full flex items-center justify-center">
@@ -790,11 +949,16 @@ export default function ChatInterface({ chatId, productId }: ChatInterfaceProps)
             <p className="text-gray-500">დაიწყეთ საუბარი მესიჯის გაგზავნით</p>
           </div>
         ) : (
-          messages.map((message) => (
-            <MessageItem key={message.id} message={message} />
-          ))
+          <>
+            {/* დავამატოთ გადახდის სტატუსის შეტყობინება ჩატის დასაწყისში */}
+            <PaymentStatusMessage />
+            
+            {messages.map((message) => (
+              <MessageItem key={message.id} message={message} />
+            ))}
+            <div ref={messagesEndRef} />
+          </>
         )}
-        <div ref={messagesEndRef} />
       </div>
 
       {/* Message Input */}
