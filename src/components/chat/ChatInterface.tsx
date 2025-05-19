@@ -6,7 +6,7 @@ import { useAuth } from "@/components/auth/AuthProvider";
 import { Chat, Message } from "@/types/chat";
 import { db, rtdb, functions, auth } from "@/firebase/config";
 import { ref, push, onValue, off } from "firebase/database";
-import { doc, getDoc, updateDoc, onSnapshot } from "firebase/firestore";
+import { doc, getDoc, updateDoc } from "firebase/firestore";
 import { addDoc, collection } from "firebase/firestore";
 import { httpsCallable } from "firebase/functions";
 
@@ -27,6 +27,7 @@ export default function ChatInterface({ chatId, productId }: ChatInterfaceProps)
   const [isSubmittingWallet, setIsSubmittingWallet] = useState<boolean>(false);
   const [isWalletSubmitted, setIsWalletSubmitted] = useState<boolean>(false);
   const [paymentCompleted, setPaymentCompleted] = useState<boolean>(false);
+  const [isDropdownOpen, setIsDropdownOpen] = useState<boolean>(false);
 
   // Fetch chat data and messages
   useEffect(() => {
@@ -52,10 +53,9 @@ export default function ChatInterface({ chatId, productId }: ChatInterfaceProps)
           // დავამატოთ ბაზიდან მიღებული ჩატის მონაცემები კონსოლში
           console.log("Chat data from Firestore:", data);
           
-          // შევამოწმოთ გადახდის სტატუსი და განვაახლოთ state
-          const isPaymentDone = !!data.paymentCompleted;
-          setPaymentCompleted(isPaymentDone);
-          console.log("Payment status:", isPaymentDone ? "Completed" : "Not completed");
+          // შევამოწმოთ გადახდის სტატუსი
+          setPaymentCompleted(!!data.paymentCompleted);
+          console.log("Payment status:", data.paymentCompleted ? "Completed" : "Not completed");
           
           // შევამოწმოთ ჩატში არის თუ არა მონაცემი lastMessage
           if (data.lastMessage) {
@@ -98,10 +98,6 @@ export default function ChatInterface({ chatId, productId }: ChatInterfaceProps)
         if (paymentConfirmationMessage) {
           setPaymentCompleted(true);
           console.log("Payment confirmation message found:", paymentConfirmationMessage);
-          
-          // ასევე შეიძლება ვცადოთ Firestore-ში ვეძებოთ გადახდის სტატუსი თუ რეალურ დროში არ მოგვაქვს
-          // ეს საშუალებას გვაძლევს დავინახოთ გადახდის სტატუსის ცვლილებები მყისიერად
-          fetchChatData();
         }
       } else {
         // თუ მონაცემები არ არის, ცარიელი მასივი დავაყენოთ
@@ -114,29 +110,9 @@ export default function ChatInterface({ chatId, productId }: ChatInterfaceProps)
       setLoading(false);
     });
 
-    // რეალურ დროში შევამოწმოთ გადახდის სტატუსი ჩატის დოკუმენტის მოთხოვნით
-    // ეს საშუალებას გვაძლევს დავინახოთ გადახდის სტატუსის ცვლილებები მყისიერად
-    const chatDocRef = doc(db, "chats", chatId);
-    const unsubscribeChatDocListener = onSnapshot(chatDocRef, (chatDocSnapshot) => {
-      if (chatDocSnapshot.exists()) {
-        const updatedChatData = chatDocSnapshot.data() as Chat;
-        console.log("Chat document updated (realtime):", updatedChatData);
-        
-        // განვაახლოთ ჩატის მონაცემები state-ში
-        setChatData(updatedChatData);
-        
-        // შევამოწმოთ გადახდის სტატუსი
-        if (updatedChatData.paymentCompleted) {
-          setPaymentCompleted(true);
-          console.log("Payment status updated to completed from realtime Firestore");
-        }
-      }
-    });
-
     return () => {
-      // Clean up listeners
+      // Clean up listener
       off(messagesRef);
-      unsubscribeChatDocListener();
     };
   }, [chatId, user]);
 
@@ -428,67 +404,72 @@ export default function ChatInterface({ chatId, productId }: ChatInterfaceProps)
           
           <div className="rounded-lg border border-blue-100 bg-blue-50 p-4 mt-4">
             <div className="font-medium text-blue-800 mb-1">Transaction status:</div>
-            {paymentCompleted ? (
-              <p className="text-green-700">
-                ✅ Payment confirmed.
-                The seller has been notified and is now required to provide the agreed login details.
-                If the seller fails to deliver or violates the terms, you can request assistance from the escrow agent using the button below.
-              </p>
-            ) : (
-              <p className="text-blue-700">The terms of the transaction were confirmed. When you send your payment, the seller will be notified, and will need to transfer the account login details based on the agreed upon terms. If the seller does not respond, of breaks the rules, you can call upon the escrow agent (button below).</p>
-            )}
+            <p className="text-blue-700">The terms of the transaction were confirmed. When you send your payment, the seller will be notified, and will need to transfer the account login details based on the agreed upon terms. If the seller does not respond, of breaks the rules, you can call upon the escrow agent (button below).</p>
           </div>
           
-          {/* Input form for payment method selection - visible only if payment is not completed */}
-          {!paymentCompleted && !isWalletSubmitted && (
+          {/* Input form for payment method selection - visible to both buyer and seller */}
+          {!isWalletSubmitted && (
             <div className="mt-4 border-t border-gray-200 pt-4">
               <div className="mb-2 text-sm font-semibold text-gray-700">
                 Please select payment method:
               </div>
-              <div className="flex gap-2">
-                <button
-                  onClick={() => setWalletAddress('bitcoin')}
-                  className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
-                    walletAddress === 'bitcoin' 
-                      ? 'bg-blue-600 text-white' 
-                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                  }`}
-                >
-                  Bitcoin
-                </button>
-                <button
-                  onClick={() => setWalletAddress('card')}
-                  className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
-                    walletAddress === 'card' 
-                      ? 'bg-blue-600 text-white' 
-                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                  }`}
-                >
-                  Card
-                </button>
-                <button
-                  onClick={handleSubmitWalletAddress}
-                  disabled={!walletAddress || isSubmittingWallet}
-                  className="ml-auto bg-green-600 text-white px-4 py-2 rounded-lg text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed hover:bg-green-700 transition-all"
-                >
-                  {isSubmittingWallet ? (
-                    <div className="flex items-center">
-                      <div className="animate-spin h-4 w-4 mr-2 border-2 border-white border-t-transparent rounded-full"></div>
-                      <span>Processing...</span>
-                    </div>
-                  ) : (
-                    'Pay the fee'
-                  )}
-                </button>
+              <div className="relative flex flex-col">
+                <div className="flex items-center gap-3">
+                  <button
+                    onClick={() => setIsDropdownOpen(!isDropdownOpen)}
+                    className="flex justify-between items-center w-48 px-4 py-2 rounded-lg text-sm font-medium bg-gray-100 text-gray-700 hover:bg-gray-200 transition-all"
+                  >
+                    <span>{walletAddress ? (walletAddress === 'card' ? 'Visa/Mastercard' : 'Bitcoin') : 'Select payment method'}</span>
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4 ml-2">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
+                    </svg>
+                  </button>
+                  
+                  <button
+                    onClick={handleSubmitWalletAddress}
+                    disabled={!walletAddress || isSubmittingWallet}
+                    className="bg-green-600 text-white px-6 py-2 rounded-lg text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed hover:bg-green-700 transition-all"
+                  >
+                    {isSubmittingWallet ? (
+                      <div className="flex items-center justify-center">
+                        <div className="animate-spin h-4 w-4 mr-2 border-2 border-white border-t-transparent rounded-full"></div>
+                        <span>Processing...</span>
+                      </div>
+                    ) : (
+                      'Pay the fee'
+                    )}
+                  </button>
+                </div>
+                
+                {isDropdownOpen && (
+                  <div className="absolute top-full left-0 w-48 mt-1 bg-white rounded-lg shadow-lg border border-gray-200 z-10">
+                    <button
+                      onClick={() => {
+                        setWalletAddress('card');
+                        setIsDropdownOpen(false);
+                      }}
+                      className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 first:rounded-t-lg"
+                    >
+                      Visa/Mastercard
+                    </button>
+                    <button
+                      onClick={() => {
+                        setWalletAddress('bitcoin');
+                        setIsDropdownOpen(false);
+                      }}
+                      className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 last:rounded-b-lg"
+                    >
+                      Bitcoin
+                    </button>
+                  </div>
+                )}
               </div>
-              <div className="mt-2 text-xs text-gray-500">
-                Note: Paying with card will redirect you to Stripe's secure payment page for a fee of 8% of the product price.
-              </div>
+            
             </div>
           )}
           
-          {/* If payment method is selected but not completed */}
-          {!paymentCompleted && isWalletSubmitted && (
+          {/* If payment method is selected */}
+          {isWalletSubmitted && (
             <div className="mt-4 border-t border-gray-200 pt-4">
               <div className="flex items-center justify-between">
                 <div className="flex items-center bg-green-50 text-green-700 p-3 rounded-lg border border-green-200">
@@ -525,18 +506,6 @@ export default function ChatInterface({ chatId, productId }: ChatInterfaceProps)
                   }
                 }
               `}</style>
-            </div>
-          )}
-          
-          {/* If payment is completed show confirmation */}
-          {paymentCompleted && (
-            <div className="mt-4 border-t border-gray-200 pt-4">
-              <div className="flex items-center bg-green-50 text-green-700 p-3 rounded-lg border border-green-200">
-                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5 mr-2 text-green-500">
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
-                <span className="font-medium">Payment has been confirmed! The seller has been notified.</span>
-              </div>
             </div>
           )}
         </div>
@@ -625,58 +594,65 @@ export default function ChatInterface({ chatId, productId }: ChatInterfaceProps)
           
           <div className="rounded-lg border border-blue-100 bg-blue-50 p-4 mt-4">
             <div className="font-medium text-blue-800 mb-1">Transaction status:</div>
-            {paymentCompleted ? (
-              <p className="text-green-700">
-                ✅ Payment confirmed.
-                The seller has been notified and is now required to provide the agreed login details.
-                If the seller fails to deliver or violates the terms, you can request assistance from the escrow agent using the button below.
-              </p>
-            ) : (
-              <p className="text-blue-700">The terms of the transaction were confirmed. When you send your payment, the seller will be notified, and will need to transfer the account login details based on the agreed upon terms. If the seller does not respond, of breaks the rules, you can call upon the escrow agent (button below).</p>
-            )}
+            <p className="text-blue-700">The terms of the transaction were confirmed. When you send your payment, the seller will be notified, and will need to transfer the account login details based on the agreed upon terms. If the seller does not respond, of breaks the rules, you can call upon the escrow agent (button below).</p>
           </div>
 
-          {/* Input form for the buyer's payment method selection - only show if payment not completed */}
-          {!paymentCompleted && !isSeller && !isWalletSubmitted && (
+          {/* Input form for the buyer's payment method selection */}
+          {!isSeller && !isWalletSubmitted && (
             <div className="mt-4 border-t border-gray-200 pt-4">
               <div className="mb-2 text-sm font-semibold text-gray-700">
                 Please select payment method:
               </div>
-              <div className="flex gap-2">
-                <button
-                  onClick={() => setWalletAddress('bitcoin')}
-                  className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
-                    walletAddress === 'bitcoin' 
-                      ? 'bg-blue-600 text-white' 
-                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                  }`}
-                >
-                  Bitcoin
-                </button>
-                <button
-                  onClick={() => setWalletAddress('card')}
-                  className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
-                    walletAddress === 'card' 
-                      ? 'bg-blue-600 text-white' 
-                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                  }`}
-                >
-                  Card
-                </button>
-                <button
-                  onClick={handleSubmitWalletAddress}
-                  disabled={!walletAddress || isSubmittingWallet}
-                  className="ml-auto bg-green-600 text-white px-4 py-2 rounded-lg text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed hover:bg-green-700 transition-all"
-                >
-                  {isSubmittingWallet ? (
-                    <div className="flex items-center">
-                      <div className="animate-spin h-4 w-4 mr-2 border-2 border-white border-t-transparent rounded-full"></div>
-                      <span>Processing...</span>
-                    </div>
-                  ) : (
-                    'Pay the fee'
-                  )}
-                </button>
+              <div className="relative flex flex-col">
+                <div className="flex items-center gap-3">
+                  <button
+                    onClick={() => setIsDropdownOpen(!isDropdownOpen)}
+                    className="flex justify-between items-center w-48 px-4 py-2 rounded-lg text-sm font-medium bg-gray-100 text-gray-700 hover:bg-gray-200 transition-all"
+                  >
+                    <span>{walletAddress ? (walletAddress === 'card' ? 'Visa/Mastercard' : 'Bitcoin') : 'Select payment method'}</span>
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4 ml-2">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
+                    </svg>
+                  </button>
+                  
+                  <button
+                    onClick={handleSubmitWalletAddress}
+                    disabled={!walletAddress || isSubmittingWallet}
+                    className="bg-green-600 text-white px-6 py-2 rounded-lg text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed hover:bg-green-700 transition-all"
+                  >
+                    {isSubmittingWallet ? (
+                      <div className="flex items-center justify-center">
+                        <div className="animate-spin h-4 w-4 mr-2 border-2 border-white border-t-transparent rounded-full"></div>
+                        <span>Processing...</span>
+                      </div>
+                    ) : (
+                      'Pay the fee'
+                    )}
+                  </button>
+                </div>
+                
+                {isDropdownOpen && (
+                  <div className="absolute top-full left-0 w-48 mt-1 bg-white rounded-lg shadow-lg border border-gray-200 z-10">
+                    <button
+                      onClick={() => {
+                        setWalletAddress('card');
+                        setIsDropdownOpen(false);
+                      }}
+                      className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 first:rounded-t-lg"
+                    >
+                      Visa/Mastercard
+                    </button>
+                    <button
+                      onClick={() => {
+                        setWalletAddress('bitcoin');
+                        setIsDropdownOpen(false);
+                      }}
+                      className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 last:rounded-b-lg"
+                    >
+                      Bitcoin
+                    </button>
+                  </div>
+                )}
               </div>
               <div className="mt-2 text-xs text-gray-500">
                 Note: Paying with card will redirect you to Stripe's secure payment page for a fee of 8% of the product price.
@@ -684,8 +660,8 @@ export default function ChatInterface({ chatId, productId }: ChatInterfaceProps)
             </div>
           )}
           
-          {/* If payment method is selected but not completed */}
-          {!paymentCompleted && isWalletSubmitted && (
+          {/* If payment method is selected */}
+          {isWalletSubmitted && (
             <div className="mt-4 border-t border-gray-200 pt-4">
               <div className="flex items-center justify-between">
                 <div className="flex items-center bg-green-50 text-green-700 p-3 rounded-lg border border-green-200">
@@ -722,18 +698,6 @@ export default function ChatInterface({ chatId, productId }: ChatInterfaceProps)
                   }
                 }
               `}</style>
-            </div>
-          )}
-          
-          {/* If payment is completed show confirmation */}
-          {paymentCompleted && (
-            <div className="mt-4 border-t border-gray-200 pt-4">
-              <div className="flex items-center bg-green-50 text-green-700 p-3 rounded-lg border border-green-200">
-                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5 mr-2 text-green-500">
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
-                <span className="font-medium">Payment has been confirmed! The seller has been notified.</span>
-              </div>
             </div>
           )}
         </div>
@@ -841,49 +805,15 @@ export default function ChatInterface({ chatId, productId }: ChatInterfaceProps)
     // თუ საუბარში უკვე არის გადახდის დადასტურების შეტყობინება, აღარ ვაჩენებთ დამატებით შეტყობინებას
     const paymentConfirmationExists = messages.some(msg => msg.isPaymentConfirmation);
     
-    // თუ ნაპოვნია გადახდის დადასტურების შეტყობინება, მაგრამ paymentCompleted ფლაგი არ არის ჩართული,
-    // ავტომატურად ვანიჭებთ მას true მნიშვნელობას, რომ UI-ს სხვა ნაწილებიც შესაბამისად განახლდეს
-    useEffect(() => {
-      if (paymentConfirmationExists && !paymentCompleted) {
-        setPaymentCompleted(true);
-        console.log("Payment confirmed based on payment confirmation message");
-      }
-    }, [paymentConfirmationExists]);
-    
-    if (!chatData?.productId) {
-      return null; // არ ვაჩვენოთ თუ ეს არ არის პროდუქტის ჩატი
+    if (paymentConfirmationExists || !chatData?.productId) {
+      return null; // არ ვაჩვენოთ თუ ეს არ არის პროდუქტის ჩატი ან უკვე არის გადახდის შეტყობინება
     }
 
-    // თუ უკვე არსებობს გადახდის დადასტურების შეტყობინება ჩატში, ვჩქმალავთ დამატებით შეტყობინებას
-    if (paymentConfirmationExists) {
-      return null;
-    }
-
-    const beforePaymentMessage = "To proceed, one of the parties must first pay the escrow transaction fee.\nThe terms of the transaction have been confirmed, but messaging and escrow support will only be enabled after payment.\nOnce the fee is paid, the seller will be required to deliver the account as agreed. If needed, you'll be able to request help from the escrow agent.";
+    const messageText = "";
     
     const afterPaymentMessage = "✅ Payment confirmed.\nThe seller has been notified and is now required to provide the agreed login details.\nIf the seller fails to deliver or violates the terms, you can request assistance from the escrow agent using the button below.";
     
-    return (
-      <div className="mb-6 p-4 rounded-lg border bg-blue-50 border-blue-100">
-        <div className="flex items-center mb-2">
-          {paymentCompleted ? (
-            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-6 h-6 text-green-600 mr-2">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-            </svg>
-          ) : (
-            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-6 h-6 text-blue-600 mr-2">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M11.25 11.25l.041-.02a.75.75 0 011.063.852l-.708 2.836a.75.75 0 001.063.853l.041-.021M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9-3.75h.008v.008H12V8.25z" />
-            </svg>
-          )}
-          <h3 className={`font-semibold ${paymentCompleted ? "text-green-800" : "text-blue-800"}`}>
-            {paymentCompleted ? "Payment Status: Confirmed" : "Payment Status: Pending"}
-          </h3>
-        </div>
-        <p className={`whitespace-pre-wrap text-sm ${paymentCompleted ? "text-green-700" : "text-blue-700"}`}>
-          {paymentCompleted ? afterPaymentMessage : beforePaymentMessage}
-        </p>
-      </div>
-    );
+        return null;
   };
 
   if (!user) {
