@@ -345,7 +345,7 @@ export default function Home() {
             const transactionId = Math.floor(1000000 + Math.random() * 9000000);
             
             await push(rtdbMessagesRef, {
-              text: `🔒 Request to Purchase ${product.displayName}
+              text: `🔒 Request to Purchase ს შმეგ ${product.displayName}
 Transaction ID: ${transactionId}
 Transaction Amount: $${product.price}
 Payment Method: ${paymentMethod === 'stripe' ? 'Stripe' : 'Bitcoin'}
@@ -380,7 +380,7 @@ The funds are then released to the seller. Payments are sent instantly via all m
             const chatDocRef = doc(db, "chats", chatId);
             await updateDoc(chatDocRef, {
               lastMessage: {
-                text: `🔒 Request to Purchase ${product.displayName}`,
+                text: `🔒 Request to Purchase ს შმეგ ${product.displayName}`,
                 timestamp: Date.now(),
                 senderId: user.id
               }
@@ -438,7 +438,7 @@ The funds are then released to the seller. Payments are sent instantly via all m
           
           // Create the first message with escrow request
           const purchaseMessage = {
-            text: `🔒 Request to Purchase ${product.displayName}
+            text: `🔒 Request to Purchase ს შმეგ ${product.displayName}
 Transaction ID: ${transactionId}
 Transaction Amount: $${product.price}
 Payment Method: ${paymentMethod === 'stripe' ? 'Stripe' : 'Bitcoin'}
@@ -476,7 +476,7 @@ The funds are then released to the seller. Payments are sent instantly via all m
           // განვაახლოთ ჩატში lastMessage ველი
           await updateDoc(doc(db, "chats", chatId), {
             lastMessage: {
-              text: `🔒 Request to Purchase ${product.displayName}`,
+              text: `🔒 Request to Purchase ს შმეგ ${product.displayName}`,
               timestamp: Date.now(),
               senderId: user.id
             }
@@ -492,7 +492,7 @@ The funds are then released to the seller. Payments are sent instantly via all m
             productImage: product.imageUrls && product.imageUrls.length > 0 ? product.imageUrls[0] : "",
             otherUserId: sellerId,
             otherUserName: product.userEmail?.split('@')[0] || "Seller",
-            lastMessage: `🔒 Request to Purchase ${product.displayName}`,
+            lastMessage: `🔒 Request to Purchase ს შმეგ ${product.displayName}`,
             lastMessageTimestamp: Date.now(),
             unreadCount: 0,
             updatedAt: Date.now()
@@ -508,7 +508,7 @@ The funds are then released to the seller. Payments are sent instantly via all m
             productImage: product.imageUrls && product.imageUrls.length > 0 ? product.imageUrls[0] : "",
             otherUserId: buyerId,
             otherUserName: user.name || user.email?.split('@')[0] || "User",
-            lastMessage: `🔒 Request to Purchase ${product.displayName}`,
+            lastMessage: `🔒 Request to Purchase ს შმეგ ${product.displayName}`,
             lastMessageTimestamp: Date.now(),
             unreadCount: 1,
             updatedAt: Date.now()

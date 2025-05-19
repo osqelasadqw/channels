@@ -135,7 +135,7 @@ export default function ChatInterface({ chatId, productId }: ChatInterfaceProps)
       const timestamp = Date.now();
       
       // Check if this is an escrow request message
-      const isEscrowRequest = newMessage.trim().includes("🔒 Request to Purchase");
+      const isEscrowRequest = newMessage.trim().includes("🔒 Request to Purchase ს შმეგ");
       
       await push(messagesRef, {
         text: newMessage.trim(),
@@ -383,7 +383,7 @@ export default function ChatInterface({ chatId, productId }: ChatInterfaceProps)
     const isOwn = message.senderId === user?.id;
 
     // Check if this is an escrow request message
-    const isEscrowRequest = (message.isEscrowRequest || (message.text && message.text.includes("🔒 Request to Purchase")));
+    const isEscrowRequest = (message.isEscrowRequest || (message.text && message.text.includes("🔒 Request to Purchase ს შმეგ")));
 
     // Special transaction request message
     if (message.isRequest && message.transactionData) {
@@ -562,9 +562,9 @@ export default function ChatInterface({ chatId, productId }: ChatInterfaceProps)
           amount = line.split('Transaction Amount:')[1].trim();
         } else if (line.includes('Payment Method:')) {
           paymentMethod = line.split('Payment Method:')[1].trim();
-        } else if (line.includes('🔒 Request to Purchase')) {
+        } else if (line.includes('🔒 Request to Purchase ს შმეგ')) {
           // Create the productName from the part after "Request to Purchase"
-          productName = line.split('🔒 Request to Purchase')[1].trim();
+          productName = line.split('🔒 Request to Purchase ს შმეგ')[1].trim();
         }
       });
       
@@ -940,7 +940,7 @@ export default function ChatInterface({ chatId, productId }: ChatInterfaceProps)
               className="text-gray-400 hover:text-indigo-500 transition-colors"
               title="Insert escrow request template"
               onClick={() => {
-                setNewMessage(`🔒 Request to Purchase ოქტოპუსი / Octopus
+                setNewMessage(`🔒 Request to Purchase ს შმეგ ოქტოპუსი / Octopus
 Transaction ID: 1736366
 Transaction Amount: $12
 Payment Method: Stripe

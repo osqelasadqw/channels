@@ -10,6 +10,7 @@ import { db } from "@/firebase/config";
 
 const ADMIN_ID = "ADMIN_USER_ID"; // Defined ADMIN_ID
 
+
 export default function ChatList() {
   const [chats, setChats] = useState<Chat[]>([]);
   const [loading, setLoading] = useState(true);
