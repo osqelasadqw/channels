@@ -220,6 +220,12 @@ export default function ChatInterface({ chatId, productId }: ChatInterfaceProps)
   // Save seller's wallet address
   const handleSubmitWalletAddress = async () => {
     if (!walletAddress) return;
+    
+    // ყველაზე მთავარი ნაწილი - ვამოწმებთ არის თუ არა მომხმარებელი ავთენტიფიცირებული
+    if (!user || !auth.currentUser) {
+      alert("გთხოვთ, თავიდან შეხვიდეთ სისტემაში. თქვენი სესია შესაძლოა ვადაგასული იყოს.");
+      return;
+    }
 
     setIsSubmittingWallet(true);
     try {
@@ -244,32 +250,32 @@ export default function ChatInterface({ chatId, productId }: ChatInterfaceProps)
         setIsWalletSubmitted(true);
       } else if (walletAddress === 'card') {
         try {
-          // შევამოწმოთ არის თუ არა მომხმარებელი ავთენტიფიცირებული
+          // თავიდან ვამოწმებთ არის თუ არა მომხმარებელი ავთენტიფიცირებული
           if (!auth.currentUser) {
-            console.error("User is not authenticated");
-            throw new Error('Authentication required. Please log in again.');
+            alert("გთხოვთ, ხელახლა გაიაროთ ავტორიზაცია");
+            return;
           }
 
-          // ვცადოთ ტოკენის განახლება
-          console.log("Refreshing authentication token...");
+          // ყოველთვის ვახლებთ მომხმარებლის მდგომარეობას და ტოკენს
+          console.log("Refreshing authentication status...");
           await auth.currentUser.reload();
           
-          // მივიღოთ მომხმარებლის ტოკენი
+          // მივიღოთ მომხმარებლის განახლებული ტოკენი
           const token = await auth.currentUser.getIdToken(true);
           
           // შევამოწმოთ ტოკენი
-          if (!token || token.trim() === '') {
-            console.error("Token is empty or invalid");
-            throw new Error('Invalid authentication token. Please log in again.');
+          if (!token) {
+            console.error("Auth token not received");
+            throw new Error('ავტორიზაციის ტოკენი არ მოიძებნა. გთხოვთ, თავიდან შეხვიდეთ სისტემაში.');
           }
           
-          console.log("Authentication token obtained successfully");
+          console.log("Authentication token refreshed successfully");
 
           // მივიღოთ current window საიტის origin-ი
           const origin = window.location.origin;
           console.log("Current origin:", origin);
 
-          // fetch-ის გამოყენებით გამოვიძახოთ HTTP ფუნქცია
+          // პირველად ვცდით HTTP API-ს გამოყენებას
           console.log("Sending payment request to API...");
           const response = await fetch('https://us-central1-projec-cca43.cloudfunctions.net/createPaymentSessionHttp', {
             method: 'POST',
@@ -280,26 +286,30 @@ export default function ChatInterface({ chatId, productId }: ChatInterfaceProps)
             },
             body: JSON.stringify({
               chatId,
-              userId: user?.id,
+              userId: user.id,    // ყოველთვის გავაგზავნოთ მომხმარებლის ID
               origin,
-              timestamp: Date.now() // დავამატოთ timestamp უნიკალურობისთვის
-            }),
-            credentials: 'include'
+              timestamp: Date.now()
+            })
           });
           
           console.log("Payment API response status:", response.status);
           
           if (!response.ok) {
-            const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
+            // HTTP სტატუსის მიხედვით სხვადასხვა შეცდომის დამუშავება
+            if (response.status === 401 || response.status === 403) {
+              throw new Error('ავტორიზაციის შეცდომა. გთხოვთ, თავიდან შეხვიდეთ სისტემაში და სცადოთ ხელახლა.');
+            }
+            
+            const errorData = await response.json().catch(() => ({ error: 'უცნობი შეცდომა' }));
             console.error('Payment API error:', errorData);
-            throw new Error(`HTTP error! status: ${response.status}, message: ${errorData.error || 'Unknown error'}`);
+            throw new Error(`HTTP შეცდომა: ${response.status}, შეტყობინება: ${errorData.error || 'უცნობი შეცდომა'}`);
           }
           
           const data = await response.json();
           console.log("Payment session created successfully:", data);
           
           if (!data.url) {
-            throw new Error('No checkout URL returned from server');
+            throw new Error('სერვერმა არ დააბრუნა გადახდის URL. გთხოვთ, სცადოთ მოგვიანებით.');
           }
           
           // გადავამისამართოთ Stripe Checkout გვერდზე
@@ -307,32 +317,34 @@ export default function ChatInterface({ chatId, productId }: ChatInterfaceProps)
           return; // ვწყვეტთ ფუნქციას, რადგან Stripe checkout გვერდზე გადადის
         } catch (fetchError) {
           console.error("Fetch error:", fetchError);
-          // ჩავარდნის შემთხვევაში ვცადოთ ძველი მეთოდით
+          // ჩავარდნის შემთხვევაში ვცადოთ ძველი მეთოდით - Firebase callable function
           console.log("Falling back to httpsCallable method");
           
           try {
-            // დავრწმუნდეთ, რომ მომხმარებელი ავთენტიფიცირებულია
+            // კვლავ ვაახლებთ აუთენტიფიკაციის მდგომარეობას
             if (!auth.currentUser) {
-              throw new Error('Authentication required for payment');
+              throw new Error('ავთენტიფიკაცია საჭიროა გადახდისთვის. გთხოვთ, შედით სისტემაში.');
             }
             
-            // მივიღოთ მომხმარებლის ტოკენი თავიდან, ჩავარდნის შემთხვევისთვის
+            // მივიღოთ მომხმარებლის ტოკენი თავიდან
             await auth.currentUser.reload();
-            await auth.currentUser.getIdToken(true);
+            const idToken = await auth.currentUser.getIdToken(true);
+            console.log("Auth token refreshed successfully:", !!idToken);
             
             console.log("Trying payment with firebase function...");
             const createSession = httpsCallable(functions, "createPaymentSession");
             const result = await createSession({ 
               chatId,
+              userId: user.id,  // დავამატოთ მომხმარებლის ID აქაც
               origin: window.location.origin,
-              timestamp: Date.now() // დავამატოთ timestamp
+              timestamp: Date.now()
             });
             
-            // შედეგის ტიპიზაცია და შემოწმება
+            // შედეგის შემოწმება
             const data = result.data as { url?: string };
             
             if (!data || !data.url) {
-              throw new Error('Invalid response from server');
+              throw new Error('სერვერმა დააბრუნა არასწორი პასუხი. სცადეთ მოგვიანებით.');
             }
             
             console.log("Payment session created successfully with fallback:", data);
@@ -343,9 +355,9 @@ export default function ChatInterface({ chatId, productId }: ChatInterfaceProps)
           } catch (error) {
             console.error("Error initiating Stripe payment:", error);
             
-            // დავამატოთ შეტყობინების ჩვენება
-            const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-            alert(`Failed to initiate credit card payment: ${errorMessage}. Please try again.`);
+            // მომხმარებელს ვაჩვენოთ შეცდომა
+            const errorMessage = error instanceof Error ? error.message : 'უცნობი შეცდომა';
+            alert(`გადახდის დაწყება ვერ მოხერხდა: ${errorMessage}. გთხოვთ, თავიდან შეხვიდეთ სისტემაში და სცადოთ ხელახლა.`);
             
             setIsSubmittingWallet(false);
             return;
@@ -355,9 +367,9 @@ export default function ChatInterface({ chatId, productId }: ChatInterfaceProps)
     } catch (error) {
       console.error("Error processing payment:", error);
       
-      // დავამატოთ შეტყობინების ჩვენება
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      alert(`Failed to process payment: ${errorMessage}. Please try again later.`);
+      // მომხმარებელს ვაჩვენოთ შეცდომა
+      const errorMessage = error instanceof Error ? error.message : 'უცნობი შეცდომა';
+      alert(`გადახდის დამუშავება ვერ მოხერხდა: ${errorMessage}. გთხოვთ, სცადოთ მოგვიანებით.`);
       
       setIsSubmittingWallet(false);
     } finally {
