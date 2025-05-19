@@ -416,7 +416,7 @@ export default function ChatInterface({ chatId, productId }: ChatInterfaceProps)
               <div className="relative">
                 <button
                   onClick={() => setIsDropdownOpen(!isDropdownOpen)}
-                  className="w-full flex justify-between items-center px-4 py-2 rounded-lg text-sm font-medium bg-gray-100 text-gray-700 hover:bg-gray-200 transition-all"
+                  className="w-auto flex justify-between items-center px-4 py-2 rounded-lg text-sm font-medium bg-gray-100 text-gray-700 hover:bg-gray-200 transition-all"
                 >
                   <span>{walletAddress ? (walletAddress === 'card' ? 'Visa/Mastercard' : 'Bitcoin') : 'Select payment method'}</span>
                   <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4 ml-2">
@@ -425,13 +425,13 @@ export default function ChatInterface({ chatId, productId }: ChatInterfaceProps)
                 </button>
                 
                 {isDropdownOpen && (
-                  <div className="absolute w-full mt-1 bg-white rounded-lg shadow-lg border border-gray-200 z-10">
+                  <div className="absolute mt-1 bg-white rounded-lg shadow-lg border border-gray-200 z-10">
                 <button
                       onClick={() => {
                         setWalletAddress('card');
                         setIsDropdownOpen(false);
                       }}
-                      className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 first:rounded-t-lg"
+                      className="w-auto text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 first:rounded-t-lg"
                 >
                       Visa/Mastercard
                 </button>
@@ -440,7 +440,7 @@ export default function ChatInterface({ chatId, productId }: ChatInterfaceProps)
                         setWalletAddress('bitcoin');
                         setIsDropdownOpen(false);
                       }}
-                      className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 last:rounded-b-lg"
+                      className="w-auto text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 last:rounded-b-lg"
                     >
                       Bitcoin
                     </button>
@@ -449,7 +449,7 @@ export default function ChatInterface({ chatId, productId }: ChatInterfaceProps)
                 <button
                   onClick={handleSubmitWalletAddress}
                   disabled={!walletAddress || isSubmittingWallet}
-                  className="mt-3 w-full bg-green-600 text-white px-4 py-2 rounded-lg text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed hover:bg-green-700 transition-all"
+                  className="mt-3 w-auto bg-green-600 text-white px-4 py-2 rounded-lg text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed hover:bg-green-700 transition-all"
                 >
                   {isSubmittingWallet ? (
                     <div className="flex items-center justify-center">
@@ -605,7 +605,7 @@ export default function ChatInterface({ chatId, productId }: ChatInterfaceProps)
               <div className="relative">
                 <button
                   onClick={() => setIsDropdownOpen(!isDropdownOpen)}
-                  className="w-full flex justify-between items-center px-4 py-2 rounded-lg text-sm font-medium bg-gray-100 text-gray-700 hover:bg-gray-200 transition-all"
+                  className="w-auto flex justify-between items-center px-4 py-2 rounded-lg text-sm font-medium bg-gray-100 text-gray-700 hover:bg-gray-200 transition-all"
                 >
                   <span>{walletAddress ? (walletAddress === 'card' ? 'Visa/Mastercard' : 'Bitcoin') : 'Select payment method'}</span>
                   <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4 ml-2">
@@ -614,13 +614,13 @@ export default function ChatInterface({ chatId, productId }: ChatInterfaceProps)
                 </button>
                 
                 {isDropdownOpen && (
-                  <div className="absolute w-full mt-1 bg-white rounded-lg shadow-lg border border-gray-200 z-10">
+                  <div className="absolute mt-1 bg-white rounded-lg shadow-lg border border-gray-200 z-10">
                 <button
                       onClick={() => {
                         setWalletAddress('card');
                         setIsDropdownOpen(false);
                       }}
-                      className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 first:rounded-t-lg"
+                      className="w-auto text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 first:rounded-t-lg"
                 >
                       Visa/Mastercard
                 </button>
@@ -629,7 +629,7 @@ export default function ChatInterface({ chatId, productId }: ChatInterfaceProps)
                         setWalletAddress('bitcoin');
                         setIsDropdownOpen(false);
                       }}
-                      className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 last:rounded-b-lg"
+                      className="w-auto text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 last:rounded-b-lg"
                     >
                       Bitcoin
                     </button>
@@ -638,7 +638,7 @@ export default function ChatInterface({ chatId, productId }: ChatInterfaceProps)
                 <button
                   onClick={handleSubmitWalletAddress}
                   disabled={!walletAddress || isSubmittingWallet}
-                  className="mt-3 w-full bg-green-600 text-white px-4 py-2 rounded-lg text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed hover:bg-green-700 transition-all"
+                  className="mt-3 w-auto bg-green-600 text-white px-4 py-2 rounded-lg text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed hover:bg-green-700 transition-all"
                 >
                   {isSubmittingWallet ? (
                     <div className="flex items-center justify-center">
