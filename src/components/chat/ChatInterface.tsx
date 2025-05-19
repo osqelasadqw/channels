@@ -226,44 +226,48 @@ export default function ChatInterface({ chatId, productId }: ChatInterfaceProps)
     try {
       console.log("Processing payment with method:", walletAddress);
       
-      if (walletAddress === 'bitcoin') {
-        // Bitcoin გადახდის ლოგიკა
-        // Create a notification for the admin
-        await addDoc(collection(db, "admin_notifications"), {
-          type: "payment_intent",
-          chatId,
-          productId: chatData?.productId || '',
-          productName: chatData?.productName || 'Unknown Product',
-          buyerName: user?.name || "Unknown Buyer",
-          buyerId: user?.id,
-          paymentMethod: walletAddress,
-          createdAt: Date.now(),
-          read: false
-        });
-
-        // Show success message
-        setIsWalletSubmitted(true);
-      } else if (walletAddress === 'card') {
-        try {
-          // მივიღოთ მომხმარებლის ტოკენი
-          if (!auth.currentUser) {
-            throw new Error('Authentication required. Please log in again.');
-          }
+      // მივიღოთ მომხმარებლის ტოკენი
+      if (!auth.currentUser) {
+        throw new Error('Authentication required. Please log in again.');
+      }
+      
+      // ტოკენის განახლება და მეტი ლოგირება
+      try {
+        const token = await auth.currentUser.getIdToken(true);
+        console.log("Authentication token refreshed successfully");
+        
+        // შევადაროთ სტრინგის მნიშვნელობები
+        if (walletAddress && walletAddress === "bitcoin") {
+          // ადმინისტრატორის შეტყობინების შექმნა
+          await addDoc(collection(db, "admin_notifications"), {
+            type: "payment_intent",
+            chatId,
+            productId: chatData?.productId || '',
+            productName: chatData?.productName || 'Unknown Product',
+            buyerName: user?.name || "Unknown Buyer",
+            buyerId: user?.id,
+            paymentMethod: walletAddress,
+            createdAt: Date.now(),
+            read: false
+          });
           
-          await auth.currentUser.getIdToken(true);
-          console.log("Authentication token refreshed");
-          
+          console.log("Bitcoin payment notification created successfully");
+          setIsWalletSubmitted(true);
+          return;
+        } else if (walletAddress && walletAddress === "card") {
           // პირდაპირ Firebase function-ის გამოძახება CORS პრობლემების თავიდან ასაცილებლად
-          const createSession = httpsCallable(functions, "createPaymentSession");
-          console.log("Calling createPaymentSession function");
+          console.log("Calling createPaymentSession function with token");
           
+          const createSession = httpsCallable(functions, "createPaymentSession");
           const result = await createSession({ 
             chatId,
+            userId: user?.id,
             origin: window.location.origin
           });
           
           // შედეგის ტიპიზაცია და შემოწმება
           const data = result.data as { url?: string };
+          console.log("Payment session result data:", data);
           
           if (!data || !data.url) {
             throw new Error('Invalid response from server - no URL returned');
@@ -273,27 +277,20 @@ export default function ChatInterface({ chatId, productId }: ChatInterfaceProps)
           
           // გადავამისამართოთ Stripe Checkout გვერდზე
           window.location.href = data.url;
-          return; // ვწყვეტთ ფუნქციას, რადგან Stripe checkout გვერდზე გადადის
-        } catch (error) {
-          console.error("Error initiating Stripe payment:", error);
-          
-          // დავამატოთ შეტყობინების ჩვენება
-          const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-          alert(`Payment processing error: ${errorMessage}. Please try again later.`);
-          
-          setIsSubmittingWallet(false);
-          return;
+        } else {
+          throw new Error('Invalid payment method selected');
         }
+      } catch (innerError) {
+        console.error("Authentication or payment processing error:", innerError);
+        throw innerError; // გადავცეთ შეცდომა გარე catch ბლოკს
       }
     } catch (error) {
-      console.error("Error processing payment:", error);
+      console.error("Error initiating payment:", error);
       
       // დავამატოთ შეტყობინების ჩვენება
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      alert(`Failed to process payment: ${errorMessage}. Please try again later.`);
+      alert(`Authentication or payment service error. Please try again later or contact support.`);
       
-      setIsSubmittingWallet(false);
-    } finally {
       setIsSubmittingWallet(false);
     }
   };
