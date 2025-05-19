@@ -419,7 +419,7 @@ export default function ChatInterface({ chatId, productId }: ChatInterfaceProps)
                 <p><span className="font-medium">3.</span> After 7 days the seller assigns primary ownership rights to the escrow agent (7 days is the minimum amount of time required in order to assign a new primary owner in the control panel).</p>
                 <p><span className="font-medium">4.</span> The escrow agent verifies everything, removes the other managers, and notifies the buyer to pay the seller.</p>
                 <p><span className="font-medium">5.</span> The buyer pays the seller.</p>
-                <p><span className="font-medium">6.</span> After the seller's confirmation, the escrow agent assigns ownership rights to the buyer.</p>
+                <p><span className="font-medium">6.</span> After the seller's confirmation, the escrow agent assigns ownership rights to the buyer</p>
               </div>
             </div>
           )}
