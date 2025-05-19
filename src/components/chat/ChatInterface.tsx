@@ -246,88 +246,43 @@ export default function ChatInterface({ chatId, productId }: ChatInterfaceProps)
       } else if (walletAddress === 'card') {
         try {
           // მივიღოთ მომხმარებლის ტოკენი
-          const token = auth.currentUser ? await auth.currentUser.getIdToken(true) : '';
-          
-          // თუ ტოკენი არ გვაქვს, შეცდომა გამოვაქვეყნოთ
-          if (!token) {
+          if (!auth.currentUser) {
             throw new Error('Authentication required. Please log in again.');
           }
-
-          // მივიღოთ current window საიტის origin-ი
-          const origin = window.location.origin;
-          console.log("Current origin:", origin);
-
-          // fetch-ის გამოყენებით გამოვიძახოთ HTTP ფუნქცია
-          const response = await fetch('https://us-central1-projec-cca43.cloudfunctions.net/createPaymentSessionHttp', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': `Bearer ${token}`,
-              'Origin': origin
-            },
-            body: JSON.stringify({
-              chatId,
-              userId: user?.id,
-              origin  // დავამატოთ origin პარამეტრიც
-            }),
-            credentials: 'include'
+          
+          await auth.currentUser.getIdToken(true);
+          console.log("Authentication token refreshed");
+          
+          // პირდაპირ Firebase function-ის გამოძახება CORS პრობლემების თავიდან ასაცილებლად
+          const createSession = httpsCallable(functions, "createPaymentSession");
+          console.log("Calling createPaymentSession function");
+          
+          const result = await createSession({ 
+            chatId,
+            origin: window.location.origin
           });
           
-          if (!response.ok) {
-            const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
-            console.error('Payment API error:', errorData);
-            throw new Error(`HTTP error! status: ${response.status}, message: ${errorData.error || 'Unknown error'}`);
+          // შედეგის ტიპიზაცია და შემოწმება
+          const data = result.data as { url?: string };
+          
+          if (!data || !data.url) {
+            throw new Error('Invalid response from server - no URL returned');
           }
           
-          const data = await response.json();
           console.log("Payment session created successfully:", data);
-          
-          if (!data.url) {
-            throw new Error('No checkout URL returned from server');
-          }
           
           // გადავამისამართოთ Stripe Checkout გვერდზე
           window.location.href = data.url;
           return; // ვწყვეტთ ფუნქციას, რადგან Stripe checkout გვერდზე გადადის
-        } catch (fetchError) {
-          console.error("Fetch error:", fetchError);
-          // ჩავარდნის შემთხვევაში ვცადოთ ძველი მეთოდით
-          console.log("Falling back to httpsCallable method");
+        } catch (error) {
+          console.error("Error initiating Stripe payment:", error);
           
-          try {
-            // მივიღოთ მომხმარებლის ტოკენი თავიდან, ჩავარდნის შემთხვევისთვის
-            if (auth.currentUser) {
-              await auth.currentUser.getIdToken(true);
-            }
-            
-            const createSession = httpsCallable(functions, "createPaymentSession");
-            const result = await createSession({ 
-              chatId,
-              origin: window.location.origin
-            });
-            
-            // შედეგის ტიპიზაცია და შემოწმება
-            const data = result.data as { url?: string };
-            
-            if (!data || !data.url) {
-              throw new Error('Invalid response from server');
-            }
-            
-            console.log("Payment session created successfully with fallback:", data);
-            
-            // გადავამისამართოთ Stripe Checkout გვერდზე
-            window.location.href = data.url;
-            return; // ვწყვეტთ ფუნქციას, რადგან Stripe checkout გვერდზე გადადის
-          } catch (error) {
-            console.error("Error initiating Stripe payment:", error);
-            
-            // დავამატოთ შეტყობინების ჩვენება
-            const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-            alert(`Failed to initiate credit card payment: ${errorMessage}. Please try again.`);
-            
-            setIsSubmittingWallet(false);
-            return;
-          }
+          // დავამატოთ შეტყობინების ჩვენება
+          const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+          alert(`Payment processing error: ${errorMessage}. Please try again later.`);
+          
+          setIsSubmittingWallet(false);
+          return;
         }
       }
     } catch (error) {
