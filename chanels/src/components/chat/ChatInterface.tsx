@@ -40,7 +40,6 @@ export default function ChatInterface({ chatId, productId }: ChatInterfaceProps)
       localStorage.setItem('lastChatId', chatId);
     }
 
-    // Get chat data from Firestore
     const fetchChatData = async () => {
       try {
         const chatDocRef = doc(db, "chats", chatId);
