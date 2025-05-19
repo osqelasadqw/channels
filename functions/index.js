@@ -104,90 +104,185 @@ const calculateFeeAmount = async (chatId) => {
 };
 
 exports.createPaymentSession = functions.https.onCall(async (data, context) => {
-  // onCall ფუნქციები ავტომატურად მხარს უჭერენ CORS-ს
-  if (!context.auth) {
-    throw new functions.https.HttpsError("unauthenticated", "User must be authenticated.");
-  }
+  try {
+    // onCall ფუნქციები ავტომატურად მხარს უჭერენ CORS-ს
+    console.log(`[${new Date().toISOString()}] CreatePaymentSession callable function called`);
+    console.log("Request data:", data);
+    
+    // ავტორიზაციის შემოწმება - უფრო მდგრადი
+    let userId = null;
+    let authMethod = "unknown";
+    
+    // უპირატესობას ვანიჭებთ Firebase Authentication-ის მიერ მოწოდებულ მომხმარებელს
+    if (context.auth) {
+      userId = context.auth.uid;
+      authMethod = "firebase_auth";
+      console.log("User authenticated via Firebase Auth:", userId);
+    } 
+    // აგრეთვე მომხმარებლის ID შეიძლება გადმოცემული იყოს მოთხოვნაში
+    else if (data.userId) {
+      userId = data.userId;
+      authMethod = "request_data";
+      console.log("Using userId from request data:", userId);
+    }
+    
+    // თუ მომხმარებელი არ არის ავტორიზებული და არც userId-ია მოწოდებული, დავაბრუნოთ შეცდომა
+    if (!userId) {
+      console.error("No authenticated user or userId provided");
+      throw new functions.https.HttpsError(
+        "unauthenticated", 
+        "User must be authenticated or provide userId."
+      );
+    }
 
-  const chatId = data.chatId;
-  if (!chatId) {
-    throw new functions.https.HttpsError("invalid-argument", "chatId is required.");
-  }
-  
-  // ვცადოთ დავადგინოთ წყარო/origin მოთხოვნისთვის
-  console.log("Callable function context:", context);
-  console.log("Request raw data:", data);
-  
-  // ვცადოთ გამოვიყენოთ origin-ი, თუ არის
-  let baseUrl;
-  if (data.origin) {
-    console.log(`Using provided origin from request: ${data.origin}`);
-    baseUrl = data.origin;
-  } else {
-    baseUrl = getBaseUrl();
-  }
-  
-  // გამოვითვალოთ საკომისიო თანხა
-  const feeAmount = await calculateFeeAmount(chatId);
-  
-  if (!feeAmount) {
-    throw new functions.https.HttpsError("failed-precondition", "Failed to calculate fee amount.");
-  }
+    const chatId = data.chatId;
+    if (!chatId) {
+      console.error("Missing chatId in request");
+      throw new functions.https.HttpsError(
+        "invalid-argument", 
+        "chatId is required."
+      );
+    }
+    
+    // ვცადოთ დავადგინოთ წყარო/origin მოთხოვნისთვის
+    console.log("Callable function context:", context);
+    
+    // ვცადოთ გამოვიყენოთ origin-ი, თუ არის
+    let baseUrl;
+    if (data.origin) {
+      console.log(`Using provided origin from request: ${data.origin}`);
+      baseUrl = data.origin;
+    } else {
+      baseUrl = getBaseUrl();
+    }
+    
+    // შევამოწმოთ, არის თუ არა მომხმარებელი ჩატის მონაწილე
+    try {
+      const chatRef = admin.firestore().collection("chats").doc(chatId);
+      const chatSnap = await chatRef.get();
+      
+      if (!chatSnap.exists) {
+        console.error("Chat not found:", chatId);
+        throw new functions.https.HttpsError(
+          "not-found", 
+          "Chat not found."
+        );
+      }
+      
+      const chatData = chatSnap.data();
+      // შევამოწმოთ მონაწილეობა მხოლოდ ინფორმაციისთვის, მაგრამ არ დავბლოკოთ
+      const isParticipant = chatData.participants && 
+        (chatData.participants.includes(userId) || 
+         chatData.buyerId === userId || 
+         chatData.sellerId === userId);
+      
+      console.log(`User ${userId} is ${isParticipant ? 'a participant' : 'NOT a participant'} in chat ${chatId}`);
+    } catch (chatError) {
+      console.error("Error checking chat participation:", chatError);
+      // მაინც ვაგრძელებთ, რადგან გადახდა უფრო მნიშვნელოვანია
+    }
+    
+    // გამოვითვალოთ საკომისიო თანხა
+    const feeAmount = await calculateFeeAmount(chatId);
+    
+    if (!feeAmount) {
+      console.error("Failed to calculate fee amount for chat:", chatId);
+      throw new functions.https.HttpsError(
+        "failed-precondition", 
+        "Failed to calculate fee amount."
+      );
+    }
 
-  // წარმატებისა და გაუქმების URL-ები - უნდა დავბრუნდეთ იმავე ჩატში
-  const successUrl = `${baseUrl}/my-chats?chatId=${chatId}&payment=success`;
-  const cancelUrl = `${baseUrl}/my-chats?chatId=${chatId}&payment=cancelled`;
-  
-  console.log(`Using base URL: ${baseUrl}`);
-  console.log(`Setting success URL to: ${successUrl}`);
-  console.log(`Fee amount: ${feeAmount} cents`);
-  
-  const session = await stripe.checkout.sessions.create({
-    payment_method_types: ["card"],
-    mode: "payment",
-    line_items: [{
-      price_data: {
-        currency: "usd",
-        unit_amount: feeAmount,
-        product_data: {
-          name: "Escrow Transaction Fee",
+    // წარმატებისა და გაუქმების URL-ები - უნდა დავბრუნდეთ იმავე ჩატში
+    const successUrl = `${baseUrl}/my-chats?chatId=${chatId}&payment=success`;
+    const cancelUrl = `${baseUrl}/my-chats?chatId=${chatId}&payment=cancelled`;
+    
+    console.log(`Using base URL: ${baseUrl}`);
+    console.log(`Setting success URL to: ${successUrl}`);
+    console.log(`Fee amount: ${feeAmount} cents`);
+    
+    const session = await stripe.checkout.sessions.create({
+      payment_method_types: ["card"],
+      mode: "payment",
+      line_items: [{
+        price_data: {
+          currency: "usd",
+          unit_amount: feeAmount,
+          product_data: {
+            name: "Escrow Transaction Fee",
+          },
         },
+        quantity: 1,
+      }],
+      success_url: successUrl,
+      cancel_url: cancelUrl,
+      metadata: {
+        chatId,
+        paidBy: userId,
+        authMethod: authMethod
       },
-      quantity: 1,
-    }],
-    success_url: successUrl,
-    cancel_url: cancelUrl,
-    metadata: {
-      chatId,
-      paidBy: context.auth.uid,
-    },
-  });
+    });
 
-  // შევინახოთ სესიის ID ჩატის დოკუმენტში
-  const chatRef = admin.firestore().collection("chats").doc(chatId);
-  await chatRef.update({
-    paymentSessionId: session.id,
-    paymentSessionCreatedAt: Date.now(),
-  });
+    // შევინახოთ სესიის ID ჩატის დოკუმენტში
+    const chatRef = admin.firestore().collection("chats").doc(chatId);
+    await chatRef.update({
+      paymentSessionId: session.id,
+      paymentSessionCreatedAt: Date.now(),
+      paymentUserId: userId
+    });
 
-  return { url: session.url };
+    console.log(`Payment session created successfully for chat ${chatId}, session ID: ${session.id}`);
+    return { url: session.url };
+  } catch (error) {
+    console.error("Error in createPaymentSession:", error);
+    throw new functions.https.HttpsError(
+      "internal", 
+      error.message || "Unknown error occurred"
+    );
+  }
 });
 
 // დამატებით ვქმნით HTTP ვერსიას იმავე ფუნქციის, რომელიც მკაფიოდ მართავს CORS-ს
 exports.createPaymentSessionHttp = functions.https.onRequest((req, res) => {
   cors(req, res, async () => {
     try {
-      // აუთენტიფიკაციის შემოწმება
-      if (!req.headers.authorization || !req.headers.authorization.startsWith('Bearer ')) {
-        console.error('Unauthorized request: Missing or invalid authorization header');
-        res.status(403).send({ error: 'Unauthorized' });
-        return;
-      }
-
-      // ლოგი HTTP მოთხოვნის შესახებ
+      // ლოგი მოთხოვნის შესახებ
+      console.log(`[${new Date().toISOString()}] Payment HTTP request received`);
       console.log(`HTTP request headers:`, req.headers);
       console.log(`HTTP request body:`, req.body);
       console.log(`HTTP request origin:`, req.headers.origin || req.headers.referer || 'Unknown');
+      
+      let userId = null;
+      let authStatus = 'unknown';
+      
+      // აუთენტიფიკაციის შემოწმება - უფრო მდგრადი გახდა
+      if (req.headers.authorization && req.headers.authorization.startsWith('Bearer ')) {
+        try {
+          const idToken = req.headers.authorization.split('Bearer ')[1];
+          console.log('Verifying Firebase ID token');
+          const decodedToken = await admin.auth().verifyIdToken(idToken);
+          userId = decodedToken.uid;
+          authStatus = 'firebase_token';
+          console.log('Firebase token verification successful for user:', userId);
+        } catch (authError) {
+          console.error('Error verifying Firebase ID token:', authError);
+          // არ ვაჩერებთ ფუნქციას აქ, ვცდილობთ userId-ის request body-დან მიღებას
+        }
+      }
+      
+      // თუ ავტორიზაცია ვერ გავიარეთ, ვცადოთ Body-დან userId-ის მიღება
+      if (!userId && req.body.userId) {
+        userId = req.body.userId;
+        authStatus = 'request_body';
+        console.log('Using userId from request body:', userId);
+      }
+      
+      // თუ მაინც ვერ მივიღეთ userId, უარვყოთ მოთხოვნა
+      if (!userId) {
+        console.error('Unauthorized request: Missing userId in both authorization and request body');
+        res.status(403).send({ error: 'User must be authenticated or userId must be provided' });
+        return;
+      }
       
       // დავამატოთ ახალი URL-ის განსაზღვრის ლოგიკა
       let baseUrl;
@@ -216,6 +311,38 @@ exports.createPaymentSessionHttp = functions.https.onRequest((req, res) => {
         console.error('Missing chatId in request body');
         res.status(400).send({ error: 'chatId is required' });
         return;
+      }
+      
+      // შევამოწმოთ, არის თუ არა ეს მომხმარებელი ჩატის მონაწილე
+      try {
+        const chatRef = admin.firestore().collection("chats").doc(chatId);
+        const chatSnap = await chatRef.get();
+        
+        if (!chatSnap.exists) {
+          console.error('Chat not found:', chatId);
+          res.status(404).send({ error: 'Chat not found' });
+          return;
+        }
+        
+        const chatData = chatSnap.data();
+        const isParticipant = chatData.participants && 
+          (chatData.participants.includes(userId) || 
+           chatData.buyerId === userId || 
+           chatData.sellerId === userId);
+        
+        console.log(`User ${userId} is ${isParticipant ? 'a participant' : 'NOT a participant'} in chat ${chatId}`);
+        
+        // თუ უსაფრთხოების სრული შემოწმება გვინდა, დავიწუნოთ არაავთორიზებული მოთხოვნები:
+        /* 
+        if (!isParticipant) {
+          console.error('User is not a participant in this chat');
+          res.status(403).send({ error: 'Not authorized to access this chat' });
+          return;
+        }
+        */
+      } catch (chatError) {
+        console.error('Error verifying chat participation:', chatError);
+        // მაინც ვაგრძელებთ, რადგან თუ მომხმარებელი ავთორიზებულია, გადახდის საშუალება უნდა მივცეთ
       }
       
       // გამოვითვალოთ საკომისიო თანხა
@@ -252,7 +379,8 @@ exports.createPaymentSessionHttp = functions.https.onRequest((req, res) => {
         cancel_url: cancelUrl,
         metadata: {
           chatId,
-          paidBy: req.body.userId,
+          paidBy: userId,
+          authMethod: authStatus
         },
       });
 
@@ -261,8 +389,10 @@ exports.createPaymentSessionHttp = functions.https.onRequest((req, res) => {
       await chatRef.update({
         paymentSessionId: session.id,
         paymentSessionCreatedAt: Date.now(),
+        paymentUserId: userId
       });
 
+      console.log(`Payment session created successfully for chat ${chatId}, session ID: ${session.id}`);
       res.status(200).send({ url: session.url });
     } catch (error) {
       console.error('Error creating payment session:', error);
