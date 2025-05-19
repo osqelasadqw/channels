@@ -173,11 +173,11 @@ export default function ProductPage({ params }: ProductPageProps) {
             await push(rtdbMessagesRef, {
               text: `
 Transaction status:
-The seller will be notified, and will need to transfer the account login details based on the agreed upon terms.
+The terms of the transaction were confirmed. When you send your payment, the seller will be notified, and will need to transfer the account login details based on the agreed upon terms. If the seller does not respond, or breaks the rules, you can call upon the escrow agent (button below).
 
 Transaction ID: ${transactionId}
 Transaction Amount: $${product.price}
-Payment Method: ${paymentMethod === 'stripe' ? 'Visa/MasterCard' : 'Bitcoin'}`,
+Payment Method: Visa/MasterCard`,
               senderId: user.id,
               senderName: user.name || user.email?.split('@')[0] || "User",
               senderPhotoURL: user.photoURL || null,
@@ -284,7 +284,7 @@ Payment Method: ${paymentMethod === 'stripe' ? 'Visa/MasterCard' : 'Bitcoin'}`,
             senderName: user.name || user.email?.split('@')[0] || "User",
             text: `
 Transaction status:
-The seller will be notified, and will need to transfer the account login details based on the agreed upon terms.
+The terms of the transaction were confirmed. When you send your payment, the seller will be notified, and will need to transfer the account login details based on the agreed upon terms. If the seller does not respond, or breaks the rules, you can call upon the escrow agent (button below).
 
 Transaction ID: ${transactionId}
 Transaction Amount: $${product.price}
@@ -627,11 +627,10 @@ Payment Method: ${paymentMethod === 'stripe' ? 'Visa/MasterCard' : 'Bitcoin'}`,
             </div>
 
             {/* Right column - Attached images (1/4) */}
-            <div className="lg:w-1/4 lg:relative">
-              <div className="lg:absolute lg:top-80">
-                <h2 className="text-xl font-bold text-gray-800 mb-3 text-center">Attached images:</h2>
+            <div className="lg:w-1/4">
+              <h2 className="text-xl font-bold text-gray-800 mb-3 text-center mt-12">Attached images:</h2>
               {product.imageUrls && product.imageUrls.length > 0 ? (
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                   {product.imageUrls.map((url, index) => (
                     <div 
                       key={index} 
@@ -641,17 +640,16 @@ Payment Method: ${paymentMethod === 'stripe' ? 'Visa/MasterCard' : 'Bitcoin'}`,
                       <Image
                         src={url}
                         alt={`${product.displayName} - Image ${index + 1}`}
-                          width={160}
-                          height={160}
+                        width={160}
+                        height={160}
                         className="w-full h-full object-cover"
                       />
                     </div>
                   ))}
                 </div>
               ) : (
-                  <div className="text-gray-500 text-center py-6 text-sm">No images attached</div>
+                <div className="text-gray-500 text-center py-6 text-sm">No images attached</div>
               )}
-              </div>
             </div>
           </div>
         </div>

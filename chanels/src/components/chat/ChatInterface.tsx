@@ -27,7 +27,6 @@ export default function ChatInterface({ chatId, productId }: ChatInterfaceProps)
   const [isSubmittingWallet, setIsSubmittingWallet] = useState<boolean>(false);
   const [isWalletSubmitted, setIsWalletSubmitted] = useState<boolean>(false);
   const [paymentCompleted, setPaymentCompleted] = useState<boolean>(false);
-  const [isDropdownOpen, setIsDropdownOpen] = useState<boolean>(false);
 
   // Fetch chat data and messages
   useEffect(() => {
@@ -40,6 +39,7 @@ export default function ChatInterface({ chatId, productId }: ChatInterfaceProps)
       localStorage.setItem('lastChatId', chatId);
     }
 
+    // Get chat data from Firestore
     const fetchChatData = async () => {
       try {
         const chatDocRef = doc(db, "chats", chatId);
@@ -135,7 +135,7 @@ export default function ChatInterface({ chatId, productId }: ChatInterfaceProps)
       const timestamp = Date.now();
       
       // Check if this is an escrow request message
-      const isEscrowRequest = newMessage.trim().includes("🔒 Request to Purchase ს შმეგ");
+      const isEscrowRequest = newMessage.trim().includes("🔒 Request to Purchase");
       
       await push(messagesRef, {
         text: newMessage.trim(),
@@ -220,12 +220,6 @@ export default function ChatInterface({ chatId, productId }: ChatInterfaceProps)
   // Save seller's wallet address
   const handleSubmitWalletAddress = async () => {
     if (!walletAddress) return;
-    
-    // ყველაზე მთავარი ნაწილი - ვამოწმებთ არის თუ არა მომხმარებელი ავთენტიფიცირებული
-    if (!user || !auth.currentUser) {
-      alert("გთხოვთ, თავიდან შეხვიდეთ სისტემაში. თქვენი სესია შესაძლოა ვადაგასული იყოს.");
-      return;
-    }
 
     setIsSubmittingWallet(true);
     try {
@@ -250,33 +244,19 @@ export default function ChatInterface({ chatId, productId }: ChatInterfaceProps)
         setIsWalletSubmitted(true);
       } else if (walletAddress === 'card') {
         try {
-          // თავიდან ვამოწმებთ არის თუ არა მომხმარებელი ავთენტიფიცირებული
-          if (!auth.currentUser) {
-            alert("გთხოვთ, ხელახლა გაიაროთ ავტორიზაცია");
-            return;
-          }
-
-          // ყოველთვის ვახლებთ მომხმარებლის მდგომარეობას და ტოკენს
-          console.log("Refreshing authentication status...");
-          await auth.currentUser.reload();
+          // მივიღოთ მომხმარებლის ტოკენი
+          const token = auth.currentUser ? await auth.currentUser.getIdToken(true) : '';
           
-          // მივიღოთ მომხმარებლის განახლებული ტოკენი
-          const token = await auth.currentUser.getIdToken(true);
-          
-          // შევამოწმოთ ტოკენი
+          // თუ ტოკენი არ გვაქვს, შეცდომა გამოვაქვეყნოთ
           if (!token) {
-            console.error("Auth token not received");
-            throw new Error('ავტორიზაციის ტოკენი არ მოიძებნა. გთხოვთ, თავიდან შეხვიდეთ სისტემაში.');
+            throw new Error('Authentication required. Please log in again.');
           }
-          
-          console.log("Authentication token refreshed successfully");
 
           // მივიღოთ current window საიტის origin-ი
           const origin = window.location.origin;
           console.log("Current origin:", origin);
 
-          // პირველად ვცდით HTTP API-ს გამოყენებას
-          console.log("Sending payment request to API...");
+          // fetch-ის გამოყენებით გამოვიძახოთ HTTP ფუნქცია
           const response = await fetch('https://us-central1-projec-cca43.cloudfunctions.net/createPaymentSessionHttp', {
             method: 'POST',
             headers: {
@@ -286,30 +266,23 @@ export default function ChatInterface({ chatId, productId }: ChatInterfaceProps)
             },
             body: JSON.stringify({
               chatId,
-              userId: user.id,    // ყოველთვის გავაგზავნოთ მომხმარებლის ID
-              origin,
-              timestamp: Date.now()
-            })
+              userId: user?.id,
+              origin  // დავამატოთ origin პარამეტრიც
+            }),
+            credentials: 'include'
           });
           
-          console.log("Payment API response status:", response.status);
-          
           if (!response.ok) {
-            // HTTP სტატუსის მიხედვით სხვადასხვა შეცდომის დამუშავება
-            if (response.status === 401 || response.status === 403) {
-              throw new Error('ავტორიზაციის შეცდომა. გთხოვთ, თავიდან შეხვიდეთ სისტემაში და სცადოთ ხელახლა.');
-            }
-            
-            const errorData = await response.json().catch(() => ({ error: 'უცნობი შეცდომა' }));
+            const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
             console.error('Payment API error:', errorData);
-            throw new Error(`HTTP შეცდომა: ${response.status}, შეტყობინება: ${errorData.error || 'უცნობი შეცდომა'}`);
+            throw new Error(`HTTP error! status: ${response.status}, message: ${errorData.error || 'Unknown error'}`);
           }
           
           const data = await response.json();
           console.log("Payment session created successfully:", data);
           
           if (!data.url) {
-            throw new Error('სერვერმა არ დააბრუნა გადახდის URL. გთხოვთ, სცადოთ მოგვიანებით.');
+            throw new Error('No checkout URL returned from server');
           }
           
           // გადავამისამართოთ Stripe Checkout გვერდზე
@@ -317,34 +290,26 @@ export default function ChatInterface({ chatId, productId }: ChatInterfaceProps)
           return; // ვწყვეტთ ფუნქციას, რადგან Stripe checkout გვერდზე გადადის
         } catch (fetchError) {
           console.error("Fetch error:", fetchError);
-          // ჩავარდნის შემთხვევაში ვცადოთ ძველი მეთოდით - Firebase callable function
+          // ჩავარდნის შემთხვევაში ვცადოთ ძველი მეთოდით
           console.log("Falling back to httpsCallable method");
           
           try {
-            // კვლავ ვაახლებთ აუთენტიფიკაციის მდგომარეობას
-            if (!auth.currentUser) {
-              throw new Error('ავთენტიფიკაცია საჭიროა გადახდისთვის. გთხოვთ, შედით სისტემაში.');
+            // მივიღოთ მომხმარებლის ტოკენი თავიდან, ჩავარდნის შემთხვევისთვის
+            if (auth.currentUser) {
+              await auth.currentUser.getIdToken(true);
             }
             
-            // მივიღოთ მომხმარებლის ტოკენი თავიდან
-            await auth.currentUser.reload();
-            const idToken = await auth.currentUser.getIdToken(true);
-            console.log("Auth token refreshed successfully:", !!idToken);
-            
-            console.log("Trying payment with firebase function...");
             const createSession = httpsCallable(functions, "createPaymentSession");
             const result = await createSession({ 
               chatId,
-              userId: user.id,  // დავამატოთ მომხმარებლის ID აქაც
-              origin: window.location.origin,
-              timestamp: Date.now()
+              origin: window.location.origin
             });
             
-            // შედეგის შემოწმება
+            // შედეგის ტიპიზაცია და შემოწმება
             const data = result.data as { url?: string };
             
             if (!data || !data.url) {
-              throw new Error('სერვერმა დააბრუნა არასწორი პასუხი. სცადეთ მოგვიანებით.');
+              throw new Error('Invalid response from server');
             }
             
             console.log("Payment session created successfully with fallback:", data);
@@ -355,9 +320,9 @@ export default function ChatInterface({ chatId, productId }: ChatInterfaceProps)
           } catch (error) {
             console.error("Error initiating Stripe payment:", error);
             
-            // მომხმარებელს ვაჩვენოთ შეცდომა
-            const errorMessage = error instanceof Error ? error.message : 'უცნობი შეცდომა';
-            alert(`გადახდის დაწყება ვერ მოხერხდა: ${errorMessage}. გთხოვთ, თავიდან შეხვიდეთ სისტემაში და სცადოთ ხელახლა.`);
+            // დავამატოთ შეტყობინების ჩვენება
+            const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+            alert(`Failed to initiate credit card payment: ${errorMessage}. Please try again.`);
             
             setIsSubmittingWallet(false);
             return;
@@ -367,9 +332,9 @@ export default function ChatInterface({ chatId, productId }: ChatInterfaceProps)
     } catch (error) {
       console.error("Error processing payment:", error);
       
-      // მომხმარებელს ვაჩვენოთ შეცდომა
-      const errorMessage = error instanceof Error ? error.message : 'უცნობი შეცდომა';
-      alert(`გადახდის დამუშავება ვერ მოხერხდა: ${errorMessage}. გთხოვთ, სცადოთ მოგვიანებით.`);
+      // დავამატოთ შეტყობინების ჩვენება
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      alert(`Failed to process payment: ${errorMessage}. Please try again later.`);
       
       setIsSubmittingWallet(false);
     } finally {
@@ -383,7 +348,7 @@ export default function ChatInterface({ chatId, productId }: ChatInterfaceProps)
     const isOwn = message.senderId === user?.id;
 
     // Check if this is an escrow request message
-    const isEscrowRequest = (message.isEscrowRequest || (message.text && message.text.includes("🔒 Request to Purchase ს შმეგ")));
+    const isEscrowRequest = (message.isEscrowRequest || (message.text && message.text.includes("🔒 Request to Purchase")));
 
     // Special transaction request message
     if (message.isRequest && message.transactionData) {
@@ -428,10 +393,10 @@ export default function ChatInterface({ chatId, productId }: ChatInterfaceProps)
               <div className="text-sm text-gray-700 space-y-2 mt-4">
                 <p><span className="font-medium">1.</span> The buyer pays a 4-8% ($3 minimum) service fee.</p>
                 <p><span className="font-medium">2.</span> The seller designates the escrow agent as manager.</p>
-                <p><span className="font-medium">3.</span> After 7 days the seller assigns primary ownership rights to the escrow agent (7 days is the minimum amount of time required in order to assign a new primary owner in the control </p>
+                <p><span className="font-medium">3.</span> After 7 days the seller assigns primary ownership rights to the escrow agent (7 days is the minimum amount of time required in order to assign a new primary owner in the control panel).</p>
                 <p><span className="font-medium">4.</span> The escrow agent verifies everything, removes the other managers, and notifies the buyer to pay the seller.</p>
                 <p><span className="font-medium">5.</span> The buyer pays the seller.</p>
-                <p><span className="font-medium">6.</span> After the seller's confirmation, the escrow agent assigns ownership rights to the buyer</p>
+                <p><span className="font-medium">6.</span> After the seller's confirmation, the escrow agent assigns ownership rights to the buyer.</p>
               </div>
             </div>
           )}
@@ -447,46 +412,34 @@ export default function ChatInterface({ chatId, productId }: ChatInterfaceProps)
               <div className="mb-2 text-sm font-semibold text-gray-700">
                 Please select payment method:
               </div>
-              <div className="relative">
+              <div className="flex gap-2">
                 <button
-                  onClick={() => setIsDropdownOpen(!isDropdownOpen)}
-                  className="w-auto flex justify-between items-center px-4 py-2 rounded-lg text-sm font-medium bg-gray-100 text-gray-700 hover:bg-gray-200 transition-all"
+                  onClick={() => setWalletAddress('bitcoin')}
+                  className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+                    walletAddress === 'bitcoin' 
+                      ? 'bg-blue-600 text-white' 
+                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                  }`}
                 >
-                  <span>{walletAddress ? (walletAddress === 'card' ? 'Visa/Mastercard' : 'Bitcoin') : 'Select payment method'}</span>
-                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4 ml-2">
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
-                  </svg>
+                  Bitcoin
                 </button>
-                
-                {isDropdownOpen && (
-                  <div className="absolute mt-1 bg-white rounded-lg shadow-lg border border-gray-200 z-10">
                 <button
-                      onClick={() => {
-                        setWalletAddress('card');
-                        setIsDropdownOpen(false);
-                      }}
-                      className="w-auto text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 first:rounded-t-lg"
+                  onClick={() => setWalletAddress('card')}
+                  className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+                    walletAddress === 'card' 
+                      ? 'bg-blue-600 text-white' 
+                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                  }`}
                 >
-                      Visa/Mastercard
+                  Card
                 </button>
-                    <button
-                      onClick={() => {
-                        setWalletAddress('bitcoin');
-                        setIsDropdownOpen(false);
-                      }}
-                      className="w-auto text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 last:rounded-b-lg"
-                    >
-                      Bitcoin
-                    </button>
-                  </div>
-                )}
                 <button
                   onClick={handleSubmitWalletAddress}
                   disabled={!walletAddress || isSubmittingWallet}
-                  className="mt-3 w-auto bg-green-600 text-white px-4 py-2 rounded-lg text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed hover:bg-green-700 transition-all"
+                  className="ml-auto bg-green-600 text-white px-4 py-2 rounded-lg text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed hover:bg-green-700 transition-all"
                 >
                   {isSubmittingWallet ? (
-                    <div className="flex items-center justify-center">
+                    <div className="flex items-center">
                       <div className="animate-spin h-4 w-4 mr-2 border-2 border-white border-t-transparent rounded-full"></div>
                       <span>Processing...</span>
                     </div>
@@ -562,9 +515,9 @@ export default function ChatInterface({ chatId, productId }: ChatInterfaceProps)
           amount = line.split('Transaction Amount:')[1].trim();
         } else if (line.includes('Payment Method:')) {
           paymentMethod = line.split('Payment Method:')[1].trim();
-        } else if (line.includes('🔒 Request to Purchase ს შმეგ')) {
+        } else if (line.includes('🔒 Request to Purchase')) {
           // Create the productName from the part after "Request to Purchase"
-          productName = line.split('🔒 Request to Purchase ს შმეგ')[1].trim();
+          productName = line.split('🔒 Request to Purchase')[1].trim();
         }
       });
       
@@ -636,46 +589,34 @@ export default function ChatInterface({ chatId, productId }: ChatInterfaceProps)
               <div className="mb-2 text-sm font-semibold text-gray-700">
                 Please select payment method:
               </div>
-              <div className="relative">
+              <div className="flex gap-2">
                 <button
-                  onClick={() => setIsDropdownOpen(!isDropdownOpen)}
-                  className="w-auto flex justify-between items-center px-4 py-2 rounded-lg text-sm font-medium bg-gray-100 text-gray-700 hover:bg-gray-200 transition-all"
+                  onClick={() => setWalletAddress('bitcoin')}
+                  className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+                    walletAddress === 'bitcoin' 
+                      ? 'bg-blue-600 text-white' 
+                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                  }`}
                 >
-                  <span>{walletAddress ? (walletAddress === 'card' ? 'Visa/Mastercard' : 'Bitcoin') : 'Select payment method'}</span>
-                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4 ml-2">
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
-                  </svg>
+                  Bitcoin
                 </button>
-                
-                {isDropdownOpen && (
-                  <div className="absolute mt-1 bg-white rounded-lg shadow-lg border border-gray-200 z-10">
                 <button
-                      onClick={() => {
-                        setWalletAddress('card');
-                        setIsDropdownOpen(false);
-                      }}
-                      className="w-auto text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 first:rounded-t-lg"
+                  onClick={() => setWalletAddress('card')}
+                  className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+                    walletAddress === 'card' 
+                      ? 'bg-blue-600 text-white' 
+                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                  }`}
                 >
-                      Visa/Mastercard
+                  Card
                 </button>
-                    <button
-                      onClick={() => {
-                        setWalletAddress('bitcoin');
-                        setIsDropdownOpen(false);
-                      }}
-                      className="w-auto text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 last:rounded-b-lg"
-                    >
-                      Bitcoin
-                    </button>
-                  </div>
-                )}
                 <button
                   onClick={handleSubmitWalletAddress}
                   disabled={!walletAddress || isSubmittingWallet}
-                  className="mt-3 w-auto bg-green-600 text-white px-4 py-2 rounded-lg text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed hover:bg-green-700 transition-all"
+                  className="ml-auto bg-green-600 text-white px-4 py-2 rounded-lg text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed hover:bg-green-700 transition-all"
                 >
                   {isSubmittingWallet ? (
-                    <div className="flex items-center justify-center">
+                    <div className="flex items-center">
                       <div className="animate-spin h-4 w-4 mr-2 border-2 border-white border-t-transparent rounded-full"></div>
                       <span>Processing...</span>
                     </div>
@@ -839,11 +780,31 @@ export default function ChatInterface({ chatId, productId }: ChatInterfaceProps)
       return null; // არ ვაჩვენოთ თუ ეს არ არის პროდუქტის ჩატი ან უკვე არის გადახდის შეტყობინება
     }
 
-    const messageText = "";
+    const beforePaymentMessage = "To proceed, one of the parties must first pay the escrow transaction fee.\nThe terms of the transaction have been confirmed, but messaging and escrow support will only be enabled after payment.\nOnce the fee is paid, the seller will be required to deliver the account as agreed. If needed, you'll be able to request help from the escrow agent.";
     
     const afterPaymentMessage = "✅ Payment confirmed.\nThe seller has been notified and is now required to provide the agreed login details.\nIf the seller fails to deliver or violates the terms, you can request assistance from the escrow agent using the button below.";
     
-        return null;
+    return (
+      <div className="mb-6 p-4 rounded-lg border bg-blue-50 border-blue-100">
+        <div className="flex items-center mb-2">
+          {paymentCompleted ? (
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-6 h-6 text-green-600 mr-2">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+          ) : (
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-6 h-6 text-blue-600 mr-2">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M11.25 11.25l.041-.02a.75.75 0 011.063.852l-.708 2.836a.75.75 0 001.063.853l.041-.021M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9-3.75h.008v.008H12V8.25z" />
+            </svg>
+          )}
+          <h3 className={`font-semibold ${paymentCompleted ? "text-green-800" : "text-blue-800"}`}>
+            {paymentCompleted ? "Payment Status: Confirmed" : "Payment Status: Pending"}
+          </h3>
+        </div>
+        <p className="whitespace-pre-wrap text-sm text-blue-700">
+          {paymentCompleted ? afterPaymentMessage : beforePaymentMessage}
+        </p>
+      </div>
+    );
   };
 
   if (!user) {
@@ -940,7 +901,7 @@ export default function ChatInterface({ chatId, productId }: ChatInterfaceProps)
               className="text-gray-400 hover:text-indigo-500 transition-colors"
               title="Insert escrow request template"
               onClick={() => {
-                setNewMessage(`🔒 Request to Purchase ს შმეგ ოქტოპუსი / Octopus
+                setNewMessage(`🔒 Request to Purchase ოქტოპუსი / Octopus
 Transaction ID: 1736366
 Transaction Amount: $12
 Payment Method: Stripe
