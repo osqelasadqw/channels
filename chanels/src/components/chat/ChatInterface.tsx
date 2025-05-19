@@ -244,19 +244,33 @@ export default function ChatInterface({ chatId, productId }: ChatInterfaceProps)
         setIsWalletSubmitted(true);
       } else if (walletAddress === 'card') {
         try {
-          // მივიღოთ მომხმარებლის ტოკენი
-          const token = auth.currentUser ? await auth.currentUser.getIdToken(true) : '';
-          
-          // თუ ტოკენი არ გვაქვს, შეცდომა გამოვაქვეყნოთ
-          if (!token) {
+          // შევამოწმოთ არის თუ არა მომხმარებელი ავთენტიფიცირებული
+          if (!auth.currentUser) {
+            console.error("User is not authenticated");
             throw new Error('Authentication required. Please log in again.');
           }
+
+          // ვცადოთ ტოკენის განახლება
+          console.log("Refreshing authentication token...");
+          await auth.currentUser.reload();
+          
+          // მივიღოთ მომხმარებლის ტოკენი
+          const token = await auth.currentUser.getIdToken(true);
+          
+          // შევამოწმოთ ტოკენი
+          if (!token || token.trim() === '') {
+            console.error("Token is empty or invalid");
+            throw new Error('Invalid authentication token. Please log in again.');
+          }
+          
+          console.log("Authentication token obtained successfully");
 
           // მივიღოთ current window საიტის origin-ი
           const origin = window.location.origin;
           console.log("Current origin:", origin);
 
           // fetch-ის გამოყენებით გამოვიძახოთ HTTP ფუნქცია
+          console.log("Sending payment request to API...");
           const response = await fetch('https://us-central1-projec-cca43.cloudfunctions.net/createPaymentSessionHttp', {
             method: 'POST',
             headers: {
@@ -267,10 +281,13 @@ export default function ChatInterface({ chatId, productId }: ChatInterfaceProps)
             body: JSON.stringify({
               chatId,
               userId: user?.id,
-              origin  // დავამატოთ origin პარამეტრიც
+              origin,
+              timestamp: Date.now() // დავამატოთ timestamp უნიკალურობისთვის
             }),
             credentials: 'include'
           });
+          
+          console.log("Payment API response status:", response.status);
           
           if (!response.ok) {
             const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
@@ -294,15 +311,21 @@ export default function ChatInterface({ chatId, productId }: ChatInterfaceProps)
           console.log("Falling back to httpsCallable method");
           
           try {
-            // მივიღოთ მომხმარებლის ტოკენი თავიდან, ჩავარდნის შემთხვევისთვის
-            if (auth.currentUser) {
-              await auth.currentUser.getIdToken(true);
+            // დავრწმუნდეთ, რომ მომხმარებელი ავთენტიფიცირებულია
+            if (!auth.currentUser) {
+              throw new Error('Authentication required for payment');
             }
             
+            // მივიღოთ მომხმარებლის ტოკენი თავიდან, ჩავარდნის შემთხვევისთვის
+            await auth.currentUser.reload();
+            await auth.currentUser.getIdToken(true);
+            
+            console.log("Trying payment with firebase function...");
             const createSession = httpsCallable(functions, "createPaymentSession");
             const result = await createSession({ 
               chatId,
-              origin: window.location.origin
+              origin: window.location.origin,
+              timestamp: Date.now() // დავამატოთ timestamp
             });
             
             // შედეგის ტიპიზაცია და შემოწმება
